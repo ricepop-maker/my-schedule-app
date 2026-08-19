@@ -15,33 +15,45 @@ let categories = [
 const PRIORITY_COLORS = { low: "#51cf66", medium: "#f5c518", high: "#ff6b6b" };
 const PRIORITY_LABELS = { low: "낮음", medium: "보통", high: "높음" };
 
+// ===== 날짜 <-> YYYY-MM-DD 문자열 변환 =====
+// toISOString()은 UTC 기준이라 한국(UTC+9)처럼 UTC보다 빠른 시간대에서는
+// 로컬 자정 날짜가 하루 전날로 밀려서 나옴 (예: 8/20 00:00 KST → "2026-08-19"Z).
+// 반드시 로컬 연/월/일 기준으로 직접 문자열을 만들어야 함.
+function toDateStr(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 // ===== 샘플 일정 데이터 (디자인 확인용) =====
 const today = new Date();
 function sampleDate(offsetDays) {
   const d = new Date(today);
   d.setDate(d.getDate() + offsetDays);
-  return d.toISOString().slice(0, 10);
+  return toDateStr(d);
 }
 
 let schedules = [
   {
     id: "s1", title: "팀 주간회의", date: sampleDate(0), startTime: "10:00", endTime: "11:00",
-    allDay: false, categoryId: "work", priority: "high", memo: "주간 업무 공유", repeat: "weekly", repeatEndDate: "",
+    allDay: false, categoryId: "work", priority: "high", doneDates: [], memo: "주간 업무 공유", repeat: "weekly", repeatEndDate: "",
     alarm: "10min"
   },
   {
     id: "s2", title: "치과 예약", date: sampleDate(2), startTime: "15:30", endTime: "16:00",
-    allDay: false, categoryId: "appointment", priority: "medium", memo: "정기 검진", repeat: "none", repeatEndDate: "",
+    allDay: false, categoryId: "appointment", priority: "medium", doneDates: [], memo: "정기 검진", repeat: "none", repeatEndDate: "",
     alarm: "1hour"
   },
   {
     id: "s3", title: "친구 생일", date: sampleDate(5), startTime: "", endTime: "",
-    allDay: true, categoryId: "personal", priority: "low", memo: "선물 준비하기", repeat: "none", repeatEndDate: "",
+    allDay: true, categoryId: "personal", priority: "low", doneDates: [], memo: "선물 준비하기", repeat: "none", repeatEndDate: "",
     alarm: "1day"
   },
   {
+    // 반복 일정의 완료는 회차별로 관리됨: 어제 회차만 완료 표시된 예시
     id: "s4", title: "헬스장", date: sampleDate(-1), startTime: "07:00", endTime: "08:00",
-    allDay: false, categoryId: "personal", priority: "low", memo: "", repeat: "daily", repeatEndDate: "",
+    allDay: false, categoryId: "personal", priority: "low", doneDates: [sampleDate(-1)], memo: "", repeat: "daily", repeatEndDate: "",
     alarm: "none"
   }
 ];
@@ -86,13 +98,20 @@ const scheduleList = el("scheduleList");
 const listEmptyMsg = el("listEmptyMsg");
 
 const statusBar = el("statusBar");
+const hoverPreview = el("hoverPreview");
 
 const scheduleModal = el("scheduleModal");
 const modalTitle = el("modalTitle");
 const scheduleForm = el("scheduleForm");
 const scheduleIdInput = el("scheduleId");
 const titleInput = el("titleInput");
+const datePickerWrap = el("datePickerWrap");
 const dateInput = el("dateInput");
+const miniCalendar = el("miniCalendar");
+const miniCalLabel = el("miniCalLabel");
+const miniCalPrevBtn = el("miniCalPrevBtn");
+const miniCalNextBtn = el("miniCalNextBtn");
+const miniCalendarGrid = el("miniCalendarGrid");
 const allDayInput = el("allDayInput");
 const timeFields = el("timeFields");
 const startTimeInput = el("startTimeInput");
@@ -111,8 +130,15 @@ const repeatInput = el("repeatInput");
 const customDaysField = el("customDaysField");
 const weekdayBtns = document.querySelectorAll(".weekday-btn");
 const repeatEndField = el("repeatEndField");
+const repeatEndBtns = document.querySelectorAll(".repeat-end-btn");
 const repeatEndInput = el("repeatEndInput");
 const alarmInput = el("alarmInput");
+const doneInput = el("doneInput");
+const markAllDoneBtn = el("markAllDoneBtn");
+const scheduleFieldset = el("scheduleFieldset");
+const viewModeActions = el("viewModeActions");
+const editModeActions = el("editModeActions");
+const editScheduleBtn = el("editScheduleBtn");
 const deleteScheduleBtn = el("deleteScheduleBtn");
 const cancelModalBtn = el("cancelModalBtn");
 const closeModalBtn = el("closeModalBtn");
@@ -124,6 +150,46 @@ function showStatus(message) {
   statusBar.classList.remove("hidden");
   clearTimeout(statusTimer);
   statusTimer = setTimeout(() => statusBar.classList.add("hidden"), 2200);
+}
+
+// ===== 일정 호버 미리보기 =====
+let hoverHideTimer = null;
+function showHoverPreview(e, s) {
+  clearTimeout(hoverHideTimer);
+  const cat = getCategory(s.categoryId);
+  const priority = s.priority || "medium";
+  const timeText = s.allDay ? "종일" : [s.startTime, s.endTime].filter(Boolean).join(" ~ ");
+
+  hoverPreview.innerHTML = `
+    <div class="hover-preview-title">${s.title}</div>
+    <div class="hover-preview-row"><span>${s.date}${timeText ? " · " + timeText : ""}</span></div>
+    <div class="hover-preview-row">
+      <span class="hover-preview-dot" style="background:${cat.color}"></span>
+      <span>${cat.name}</span>
+      <span class="hover-preview-dot" style="background:${PRIORITY_COLORS[priority]}"></span>
+      <span>${PRIORITY_LABELS[priority]}</span>
+    </div>
+    ${s.memo ? `<div class="hover-preview-memo">${s.memo}</div>` : ""}
+  `;
+  hoverPreview.classList.remove("hidden");
+  requestAnimationFrame(() => hoverPreview.classList.add("visible"));
+  positionHoverPreview(e);
+}
+
+function positionHoverPreview(e) {
+  const offset = 14;
+  let x = e.clientX + offset;
+  let y = e.clientY + offset;
+  const rect = hoverPreview.getBoundingClientRect();
+  if (x + rect.width > window.innerWidth - 8) x = e.clientX - rect.width - offset;
+  if (y + rect.height > window.innerHeight - 8) y = e.clientY - rect.height - offset;
+  hoverPreview.style.left = `${x}px`;
+  hoverPreview.style.top = `${y}px`;
+}
+
+function hideHoverPreview() {
+  hoverPreview.classList.remove("visible");
+  hoverHideTimer = setTimeout(() => hoverPreview.classList.add("hidden"), 120);
 }
 
 // ===== 로그인 화면 (미리보기: 실제 인증 없음) =====
@@ -226,6 +292,51 @@ function getCategory(id) {
   return categories.find((c) => c.id === id) || categories[categories.length - 1];
 }
 
+// ===== 대한민국 공휴일 (Nager.Date API, 연도 단위로 캐싱) =====
+const HOLIDAY_API_BASE = "https://date.nager.at/api/v3/PublicHolidays";
+let holidayCache = {}; // { [year]: { 'YYYY-MM-DD': localName } }
+
+// 양력 고정 공휴일의 원래 날짜(MM-DD). Nager.Date는 대체공휴일의 실제 날짜는 정확히 계산해 주지만
+// 이름에 "대체공휴일" 표시는 안 붙여주므로, 원래 날짜와 다르면 여기서 보정해줌.
+const FIXED_HOLIDAY_MMDD = {
+  "새해": "01-01",
+  "3·1절": "03-01",
+  "어린이날": "05-05",
+  "현충일": "06-06",
+  "제헌절": "07-17",
+  "광복절": "08-15",
+  "개천절": "10-03",
+  "한글날": "10-09",
+  "크리스마스": "12-25"
+};
+
+async function fetchHolidays(year) {
+  if (holidayCache[year]) return;
+  try {
+    const res = await fetch(`${HOLIDAY_API_BASE}/${year}/KR`);
+    if (!res.ok) throw new Error("공휴일 조회 실패");
+    const list = await res.json();
+    const map = {};
+    list.forEach((h) => {
+      const mmdd = h.date.slice(5);
+      const originalMmdd = FIXED_HOLIDAY_MMDD[h.localName];
+      const isSubstitute = originalMmdd && originalMmdd !== mmdd;
+      map[h.date] = isSubstitute ? `대체공휴일(${h.localName})` : h.localName;
+    });
+    holidayCache[year] = map;
+  } catch (err) {
+    holidayCache[year] = {}; // 실패해도 캐싱해서 매 렌더링마다 재요청하지 않도록 함
+    showStatus("공휴일 정보를 불러오지 못했습니다");
+  }
+  if (!calendarView.classList.contains("hidden")) renderCalendar();
+  if (!miniCalendar.classList.contains("hidden")) renderMiniCalendar();
+}
+
+function getHolidayName(dateStr) {
+  const year = dateStr.slice(0, 4);
+  return holidayCache[year] ? holidayCache[year][dateStr] : undefined;
+}
+
 // ===== 반복 일정 펼치기 (해당 월 범위 내에서) =====
 function expandRecurring(schedule, rangeStart, rangeEnd) {
   const occurrences = [];
@@ -242,7 +353,7 @@ function expandRecurring(schedule, rangeStart, rangeEnd) {
 
   while (cursor <= loopEnd) {
     if (cursor >= base && matchesRepeat(schedule, base, cursor)) {
-      occurrences.push(cursor.toISOString().slice(0, 10));
+      occurrences.push(toDateStr(cursor));
     }
     cursor.setDate(cursor.getDate() + 1);
   }
@@ -309,11 +420,16 @@ function renderCalendar() {
   }
 
   calendarGrid.innerHTML = "";
-  const todayStr = today.toISOString().slice(0, 10);
+  const todayStr = toDateStr(today);
+
+  const yearsInView = new Set(cells.map(({ cellDate }) => cellDate.getFullYear()));
+  yearsInView.forEach((y) => fetchHolidays(y));
 
   cells.forEach(({ cellDate, otherMonth }) => {
-    const dateStr = cellDate.toISOString().slice(0, 10);
+    const dateStr = toDateStr(cellDate);
     const dayEvents = occByDate[dateStr] || [];
+    const dayOfWeek = cellDate.getDay();
+    const holidayName = getHolidayName(dateStr);
 
     const cell = document.createElement("div");
     cell.className = "calendar-cell";
@@ -321,16 +437,29 @@ function renderCalendar() {
     if (dateStr === todayStr) cell.classList.add("is-today");
     if (state.selectedDate === dateStr) cell.classList.add("is-selected");
 
+    if (holidayName) cell.classList.add("is-holiday");
+    else if (dayOfWeek === 0) cell.classList.add("is-sunday");
+    else if (dayOfWeek === 6) cell.classList.add("is-saturday");
+
     const dateEl = document.createElement("div");
     dateEl.className = "cell-date";
     dateEl.textContent = cellDate.getDate();
     cell.appendChild(dateEl);
+
+    if (holidayName) {
+      const holidayLabel = document.createElement("div");
+      holidayLabel.className = "holiday-label";
+      holidayLabel.textContent = holidayName;
+      holidayLabel.title = holidayName;
+      cell.appendChild(holidayLabel);
+    }
 
     const eventsEl = document.createElement("div");
     eventsEl.className = "cell-events";
     dayEvents.slice(0, 3).forEach((s) => {
       const chip = document.createElement("div");
       chip.className = "event-chip";
+      if (isOccurrenceDone(s, dateStr)) chip.classList.add("is-done");
       chip.style.background = getCategory(s.categoryId).color;
 
       const dot = document.createElement("span");
@@ -338,6 +467,14 @@ function renderCalendar() {
       dot.style.background = PRIORITY_COLORS[s.priority] || PRIORITY_COLORS.medium;
       chip.appendChild(dot);
       chip.appendChild(document.createTextNode(s.title));
+
+      chip.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openModal(s, dateStr);
+      });
+      chip.addEventListener("mouseenter", (e) => showHoverPreview(e, s));
+      chip.addEventListener("mousemove", positionHoverPreview);
+      chip.addEventListener("mouseleave", hideHoverPreview);
 
       eventsEl.appendChild(chip);
     });
@@ -370,7 +507,7 @@ function showDayDetail(dateStr, dayEvents) {
     li.textContent = "등록된 일정이 없습니다";
     dayDetailList.appendChild(li);
   } else {
-    dayEvents.forEach((s) => dayDetailList.appendChild(buildScheduleCard(s)));
+    dayEvents.forEach((s) => dayDetailList.appendChild(buildScheduleCard({ ...s, date: dateStr })));
   }
 
   dayDetailPanel.classList.remove("hidden");
@@ -400,14 +537,101 @@ function renderList() {
   items.forEach((s) => scheduleList.appendChild(buildScheduleCard(s)));
 }
 
+// ===== 완료 여부 (회차 단위로 관리) =====
+// 반복 없는 일정은 doneDates에 자기 날짜 하나만 들어있거나 비어있음.
+// 반복 일정은 회차(occurrence)별 날짜를 doneDates에 개별 기록 — 한 회차 완료가 전체에 영향 주지 않음.
+function isOccurrenceDone(schedule, date) {
+  return (schedule.doneDates || []).includes(date);
+}
+
+function toggleOccurrenceDone(scheduleId, date) {
+  const schedule = schedules.find((s) => s.id === scheduleId);
+  if (!schedule) return;
+  const set = new Set(schedule.doneDates || []);
+  const nowDone = !set.has(date);
+  if (nowDone) set.add(date); else set.delete(date);
+  schedule.doneDates = [...set];
+  renderAll();
+  syncCurrentEditingSchedule();
+  updateMarkAllDoneButton();
+  showStatus(nowDone ? "완료로 표시했습니다" : "완료 표시를 해제했습니다");
+}
+
+// "전체 완료"의 적용 범위: 반복 종료일이 있으면 그때까지, 없으면(무한) 시작일로부터 1년치까지만 실질 적용
+function getAllOccurrenceDates(schedule) {
+  const rangeStart = new Date(schedule.date + "T00:00:00");
+  const boundEnd = schedule.repeatEndDate
+    ? new Date(schedule.repeatEndDate + "T00:00:00")
+    : new Date(rangeStart.getFullYear() + 1, rangeStart.getMonth(), rangeStart.getDate());
+  return expandRecurring(schedule, rangeStart, boundEnd);
+}
+
+function areAllOccurrencesDone(schedule) {
+  const dates = getAllOccurrenceDates(schedule);
+  return dates.length > 0 && dates.every((d) => isOccurrenceDone(schedule, d));
+}
+
+function toggleAllOccurrencesDone(scheduleId) {
+  const schedule = schedules.find((s) => s.id === scheduleId);
+  if (!schedule) return;
+  const allDone = areAllOccurrencesDone(schedule);
+
+  if (allDone) {
+    if (!window.confirm("이 반복 일정의 완료 표시를 모두 해제하시겠습니까?")) return;
+    schedule.doneDates = [];
+    showStatus("모든 회차의 완료 표시를 해제했습니다");
+  } else {
+    if (!window.confirm("이 반복 일정의 모든 회차를 완료로 표시하시겠습니까?\n(반복 종료일이 없으면 1년치까지만 적용됩니다)")) return;
+    schedule.doneDates = getAllOccurrenceDates(schedule);
+    showStatus("모든 회차를 완료로 표시했습니다");
+  }
+  renderAll();
+  syncCurrentEditingSchedule();
+  updateMarkAllDoneButton();
+}
+
+function syncCurrentEditingSchedule() {
+  if (!currentEditingSchedule) return;
+  const fresh = schedules.find((s) => s.id === currentEditingSchedule.id);
+  if (fresh) currentEditingSchedule = fresh;
+}
+
+function updateMarkAllDoneButton() {
+  if (!currentEditingSchedule || currentEditingSchedule.repeat === "none") {
+    markAllDoneBtn.classList.add("hidden");
+    return;
+  }
+  markAllDoneBtn.classList.remove("hidden");
+  markAllDoneBtn.textContent = areAllOccurrencesDone(currentEditingSchedule) ? "전체 완료 해제" : "전체 완료";
+}
+
 function buildScheduleCard(s) {
   const card = document.createElement("li");
   card.className = "schedule-card";
   const cat = getCategory(s.categoryId);
   card.style.borderLeftColor = cat.color;
 
-  const isPast = s.date < today.toISOString().slice(0, 10);
+  const isPast = s.date < toDateStr(today);
   if (isPast) card.classList.add("is-past");
+  const occurrenceDone = isOccurrenceDone(s, s.date);
+  if (occurrenceDone) card.classList.add("is-done");
+
+  const doneCheckbox = document.createElement("input");
+  doneCheckbox.type = "checkbox";
+  doneCheckbox.className = "done-checkbox";
+  doneCheckbox.checked = occurrenceDone;
+  doneCheckbox.title = s.repeat !== "none" ? "이 회차만 완료 표시" : "완료 표시";
+  doneCheckbox.addEventListener("click", (e) => e.stopPropagation());
+  doneCheckbox.addEventListener("change", () => {
+    const nextDone = doneCheckbox.checked;
+    const confirmMsg = nextDone ? "이 일정을 완료로 표시하시겠습니까?" : "완료 표시를 해제하시겠습니까?";
+    if (window.confirm(confirmMsg)) {
+      toggleOccurrenceDone(s.id, s.date);
+    } else {
+      doneCheckbox.checked = !nextDone;
+    }
+  });
+  card.appendChild(doneCheckbox);
 
   const main = document.createElement("div");
   main.className = "schedule-card-main";
@@ -432,7 +656,13 @@ function buildScheduleCard(s) {
   main.appendChild(metaEl);
 
   card.appendChild(main);
-  card.addEventListener("click", () => openModal(s));
+  card.addEventListener("click", () => {
+    const master = schedules.find((sch) => sch.id === s.id) || s;
+    openModal(master, s.date);
+  });
+  card.addEventListener("mouseenter", (e) => showHoverPreview(e, s));
+  card.addEventListener("mousemove", positionHoverPreview);
+  card.addEventListener("mouseleave", hideHoverPreview);
   return card;
 }
 
@@ -455,13 +685,28 @@ tabBtns.forEach((btn) => {
 });
 
 // ===== 모달: 일정 추가/수정 =====
-function openModal(schedule) {
+let currentEditingSchedule = null;
+let currentOccurrenceDate = null; // 모달에서 보고 있는 회차의 날짜 (완료 토글에 사용, 반복 마스터의 date와 다를 수 있음)
+
+function setModalMode(mode) {
+  const isView = mode === "view";
+  scheduleFieldset.disabled = isView;
+  viewModeActions.classList.toggle("hidden", !isView);
+  editModeActions.classList.toggle("hidden", isView);
+  if (currentEditingSchedule) {
+    modalTitle.textContent = isView ? "일정 상세" : "일정 수정";
+  }
+}
+
+function openModal(schedule, occurrenceDate) {
   scheduleForm.reset();
   newCategoryFields.classList.add("hidden");
   categoryOptionsList.classList.add("hidden");
+  currentEditingSchedule = schedule || null;
+  currentOccurrenceDate = schedule ? (occurrenceDate || schedule.date) : null;
 
   if (schedule) {
-    modalTitle.textContent = "일정 수정";
+    modalTitle.textContent = "일정 상세";
     scheduleIdInput.value = schedule.id;
     titleInput.value = schedule.title;
     dateInput.value = schedule.date;
@@ -472,32 +717,157 @@ function openModal(schedule) {
     setPrioritySelection(schedule.priority || "medium");
     memoInput.value = schedule.memo || "";
     repeatInput.value = schedule.repeat;
-    repeatEndInput.value = schedule.repeatEndDate || "";
+    setRepeatEndPreset(inferRepeatEndPreset(schedule), schedule.date, schedule.repeatEndDate);
     alarmInput.value = schedule.alarm;
+    doneInput.checked = isOccurrenceDone(schedule, currentOccurrenceDate);
     setCustomDaysSelection(schedule.customDays || []);
     deleteScheduleBtn.classList.remove("hidden");
+    setModalMode("view");
   } else {
     modalTitle.textContent = "일정 추가";
     scheduleIdInput.value = "";
-    dateInput.value = state.selectedDate || today.toISOString().slice(0, 10);
+    dateInput.value = state.selectedDate || toDateStr(today);
     selectCategory(categories[0]);
     setPrioritySelection("medium");
+    repeatInput.value = "none"; // 새 일정은 항상 반복 없음이 기본값
+    setRepeatEndPreset("infinite", dateInput.value);
+    doneInput.checked = false;
     setCustomDaysSelection([]);
     deleteScheduleBtn.classList.add("hidden");
+    setModalMode("edit");
   }
 
   toggleTimeFields();
   toggleRepeatEndField();
   toggleCustomDaysField();
+  updateMarkAllDoneButton();
+
+  hideHoverPreview();
   scheduleModal.classList.remove("hidden");
+  requestAnimationFrame(() => scheduleModal.classList.add("modal-open"));
 }
 
 function closeModal() {
-  scheduleModal.classList.add("hidden");
+  scheduleModal.classList.remove("modal-open");
+  setTimeout(() => scheduleModal.classList.add("hidden"), 180);
+  closeMiniCalendar();
 }
 
+// ===== 날짜 입력용 미니 달력 =====
+let miniCalMonth = new Date();
+
+function openMiniCalendar() {
+  const base = dateInput.value ? new Date(dateInput.value + "T00:00:00") : new Date();
+  miniCalMonth = new Date(base.getFullYear(), base.getMonth(), 1);
+  renderMiniCalendar();
+  miniCalendar.classList.remove("hidden");
+}
+
+function closeMiniCalendar() {
+  miniCalendar.classList.add("hidden");
+}
+
+function renderMiniCalendar() {
+  const year = miniCalMonth.getFullYear();
+  const month = miniCalMonth.getMonth();
+  miniCalLabel.textContent = `${year}년 ${month + 1}월`;
+  fetchHolidays(year);
+
+  const firstDay = new Date(year, month, 1);
+  const startOffset = firstDay.getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const daysInPrevMonth = new Date(year, month, 0).getDate();
+  const totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7;
+
+  const todayStr = toDateStr(today);
+  const selectedStr = dateInput.value;
+
+  miniCalendarGrid.innerHTML = "";
+  for (let i = 0; i < totalCells; i++) {
+    const dayNum = i - startOffset + 1;
+    let cellDate, otherMonth = false;
+    if (dayNum < 1) {
+      cellDate = new Date(year, month - 1, daysInPrevMonth + dayNum);
+      otherMonth = true;
+    } else if (dayNum > daysInMonth) {
+      cellDate = new Date(year, month + 1, dayNum - daysInMonth);
+      otherMonth = true;
+    } else {
+      cellDate = new Date(year, month, dayNum);
+    }
+    const dateStr = toDateStr(cellDate);
+    const dayOfWeek = cellDate.getDay();
+    const holidayName = getHolidayName(dateStr);
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "mini-cal-day";
+    btn.textContent = cellDate.getDate();
+    if (otherMonth) btn.classList.add("other-month");
+    if (dateStr === todayStr) btn.classList.add("is-today");
+    if (dateStr === selectedStr) btn.classList.add("is-selected");
+    if (holidayName) btn.classList.add("is-holiday");
+    else if (dayOfWeek === 0) btn.classList.add("is-sunday");
+    else if (dayOfWeek === 6) btn.classList.add("is-saturday");
+    if (holidayName) btn.title = holidayName;
+
+    btn.addEventListener("click", () => {
+      dateInput.value = dateStr;
+      dateInput.dispatchEvent(new Event("change"));
+      closeMiniCalendar();
+    });
+
+    miniCalendarGrid.appendChild(btn);
+  }
+}
+
+dateInput.addEventListener("click", () => {
+  if (miniCalendar.classList.contains("hidden")) openMiniCalendar();
+  else closeMiniCalendar();
+});
+
+miniCalPrevBtn.addEventListener("click", () => {
+  miniCalMonth = new Date(miniCalMonth.getFullYear(), miniCalMonth.getMonth() - 1, 1);
+  renderMiniCalendar();
+});
+
+miniCalNextBtn.addEventListener("click", () => {
+  miniCalMonth = new Date(miniCalMonth.getFullYear(), miniCalMonth.getMonth() + 1, 1);
+  renderMiniCalendar();
+});
+
+document.addEventListener("click", (e) => {
+  if (!datePickerWrap.contains(e.target)) closeMiniCalendar();
+});
+
 addScheduleBtn.addEventListener("click", () => openModal(null));
-cancelModalBtn.addEventListener("click", closeModal);
+editScheduleBtn.addEventListener("click", () => setModalMode("edit"));
+
+// 완료 여부는 fieldset 밖에 있어서 보기 모드에서도 바로 토글 가능. 기존 일정이면 즉시 반영(확인 팝업, 이 회차만), 새 일정이면 저장 시점에만 반영.
+doneInput.addEventListener("change", () => {
+  if (!currentEditingSchedule) return;
+  const nextDone = doneInput.checked;
+  const confirmMsg = nextDone ? "이 일정을 완료로 표시하시겠습니까?" : "완료 표시를 해제하시겠습니까?";
+  if (window.confirm(confirmMsg)) {
+    toggleOccurrenceDone(currentEditingSchedule.id, currentOccurrenceDate);
+  } else {
+    doneInput.checked = !nextDone;
+  }
+});
+
+markAllDoneBtn.addEventListener("click", () => {
+  if (!currentEditingSchedule) return;
+  toggleAllOccurrencesDone(currentEditingSchedule.id);
+  doneInput.checked = isOccurrenceDone(currentEditingSchedule, currentOccurrenceDate);
+});
+
+cancelModalBtn.addEventListener("click", () => {
+  if (currentEditingSchedule) {
+    openModal(currentEditingSchedule, currentOccurrenceDate); // 변경사항 취소하고 원래 값 + 보기 모드로 복원
+  } else {
+    closeModal();
+  }
+});
 closeModalBtn.addEventListener("click", closeModal);
 scheduleModal.addEventListener("click", (e) => {
   if (e.target === scheduleModal) closeModal();
@@ -570,6 +940,7 @@ function toggleTimeFields() {
 repeatInput.addEventListener("change", () => {
   toggleRepeatEndField();
   toggleCustomDaysField();
+  if (repeatInput.value !== "none") setRepeatEndPreset("infinite", dateInput.value);
 });
 
 function toggleRepeatEndField() {
@@ -579,6 +950,56 @@ function toggleRepeatEndField() {
 function toggleCustomDaysField() {
   customDaysField.classList.toggle("hidden", repeatInput.value !== "custom");
 }
+
+// ===== 반복 종료 프리셋 (무한 / 1주일 / 한달 / 1년 / 직접 선택) =====
+let repeatEndPreset = "infinite";
+
+function computeRepeatEndDate(preset, startDateStr) {
+  if (!startDateStr) return "";
+  const d = new Date(startDateStr + "T00:00:00");
+  if (preset === "1week") d.setDate(d.getDate() + 7);
+  else if (preset === "1month") d.setMonth(d.getMonth() + 1);
+  else if (preset === "1year") d.setFullYear(d.getFullYear() + 1);
+  else return "";
+  return toDateStr(d);
+}
+
+function setRepeatEndPreset(preset, startDateStr, customEndDate) {
+  repeatEndPreset = preset;
+  repeatEndBtns.forEach((b) => b.classList.toggle("selected", b.dataset.preset === preset));
+
+  if (preset === "infinite") {
+    repeatEndInput.value = "";
+    repeatEndInput.classList.add("hidden");
+    repeatEndInput.disabled = true;
+  } else if (preset === "custom") {
+    repeatEndInput.value = customEndDate || repeatEndInput.value || "";
+    repeatEndInput.classList.remove("hidden");
+    repeatEndInput.disabled = false;
+  } else {
+    repeatEndInput.value = computeRepeatEndDate(preset, startDateStr);
+    repeatEndInput.classList.remove("hidden");
+    repeatEndInput.disabled = true;
+  }
+}
+
+function inferRepeatEndPreset(schedule) {
+  if (!schedule.repeatEndDate) return "infinite";
+  if (schedule.repeatEndDate === computeRepeatEndDate("1week", schedule.date)) return "1week";
+  if (schedule.repeatEndDate === computeRepeatEndDate("1month", schedule.date)) return "1month";
+  if (schedule.repeatEndDate === computeRepeatEndDate("1year", schedule.date)) return "1year";
+  return "custom";
+}
+
+repeatEndBtns.forEach((btn) => {
+  btn.addEventListener("click", () => setRepeatEndPreset(btn.dataset.preset, dateInput.value));
+});
+
+dateInput.addEventListener("change", () => {
+  if (repeatEndPreset !== "infinite" && repeatEndPreset !== "custom") {
+    setRepeatEndPreset(repeatEndPreset, dateInput.value);
+  }
+});
 
 let selectedCustomDays = [];
 weekdayBtns.forEach((btn) => {
@@ -632,13 +1053,15 @@ scheduleForm.addEventListener("submit", (e) => {
     customDays: repeatInput.value === "custom" ? [...selectedCustomDays] : [],
     alarm: alarmInput.value
   };
+  // doneDates는 여기 포함하지 않음: 완료 여부는 체크박스에서 회차 단위로 별도 반영되므로,
+  // 저장 시 기존 일정의 doneDates를 통째로 덮어쓰지 않도록 함
 
   const id = scheduleIdInput.value;
   if (id) {
     const idx = schedules.findIndex((s) => s.id === id);
     if (idx !== -1) schedules[idx] = { ...schedules[idx], ...data };
   } else {
-    schedules.push({ id: "s_" + Date.now(), ...data });
+    schedules.push({ id: "s_" + Date.now(), ...data, doneDates: doneInput.checked ? [dateInput.value] : [] });
   }
 
   closeModal();

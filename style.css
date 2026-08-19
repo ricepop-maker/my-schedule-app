@@ -9,6 +9,8 @@
   --text-muted: #868e96;
   --danger: #fa5252;
   --today-bg: #fff3bf;
+  --sunday-color: #e03131;
+  --saturday-color: #1971c2;
   --radius: 10px;
   --shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
 }
@@ -179,10 +181,10 @@ body {
 .toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   padding: 16px 28px;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 24px;
 }
 
 .month-nav {
@@ -290,6 +292,9 @@ main { padding: 0 28px; }
   padding: 8px 0;
 }
 
+.calendar-weekdays span:first-child { color: var(--sunday-color); }
+.calendar-weekdays span:last-child { color: var(--saturday-color); }
+
 .calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
@@ -316,6 +321,20 @@ main { padding: 0 28px; }
 .calendar-cell.is-today .cell-date { background: var(--today-bg); border-radius: 50%; }
 
 .calendar-cell.is-selected { outline: 2px solid var(--accent); }
+
+.calendar-cell.is-sunday .cell-date,
+.calendar-cell.is-holiday .cell-date { color: var(--sunday-color); }
+
+.calendar-cell.is-saturday .cell-date { color: var(--saturday-color); }
+
+.holiday-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--sunday-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .cell-date {
   font-size: 13px;
@@ -344,6 +363,11 @@ main { padding: 0 28px; }
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.event-chip.is-done {
+  opacity: 0.55;
+  text-decoration: line-through;
 }
 
 .priority-dot {
@@ -389,16 +413,26 @@ main { padding: 0 28px; }
   border-radius: var(--radius);
   padding: 12px 14px;
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 10px;
   cursor: pointer;
 }
 
 .schedule-card:hover { box-shadow: var(--shadow); }
 
 .schedule-card.is-past { opacity: 0.5; }
+.schedule-card.is-done { opacity: 0.55; }
+.schedule-card.is-done .schedule-card-title { text-decoration: line-through; }
 
-.schedule-card-main { display: flex; flex-direction: column; gap: 3px; }
+.done-checkbox {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.schedule-card-main { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 
 .schedule-card-title { font-weight: 600; font-size: 14px; }
 
@@ -413,6 +447,53 @@ main { padding: 0 28px; }
 }
 
 .empty-msg { text-align: center; color: var(--text-muted); padding: 40px 0; }
+
+/* ===== 일정 호버 미리보기 ===== */
+.hover-preview {
+  position: fixed;
+  z-index: 300;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 10px 12px;
+  max-width: 220px;
+  pointer-events: none;
+  font-size: 12px;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.hover-preview.visible { opacity: 1; transform: translateY(0); }
+
+.hover-preview-title {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.hover-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+.hover-preview-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.hover-preview-memo {
+  margin-top: 6px;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
 /* ===== 상태 메시지 바 ===== */
 .status-bar {
@@ -439,7 +520,11 @@ main { padding: 0 28px; }
   justify-content: center;
   z-index: 100;
   padding: 16px;
+  opacity: 0;
+  transition: opacity 0.18s ease;
 }
+
+.modal-overlay.modal-open { opacity: 1; }
 
 .modal {
   background: var(--surface);
@@ -449,7 +534,12 @@ main { padding: 0 28px; }
   max-height: 90vh;
   overflow-y: auto;
   padding: 20px 24px 24px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2);
+  transform: scale(0.92) translateY(8px);
+  transition: transform 0.18s ease;
 }
+
+.modal-overlay.modal-open .modal { transform: scale(1) translateY(0); }
 
 .modal-header {
   display: flex;
@@ -496,6 +586,18 @@ main { padding: 0 28px; }
 
 .checkbox-field input { width: 16px; height: 16px; }
 
+.done-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px dashed var(--border);
+}
+
+.done-field .checkbox-field { margin: 0; }
+
 .field-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -508,6 +610,75 @@ main { padding: 0 28px; }
 .category-row { display: flex; gap: 8px; }
 
 .category-row select { flex: 1; }
+
+/* ===== 날짜 입력용 미니 달력 ===== */
+.date-picker-wrap {
+  position: relative;
+}
+
+.date-picker-wrap input[type="text"] {
+  width: 100%;
+  cursor: pointer;
+  background: var(--surface);
+}
+
+.mini-calendar {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  width: 260px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 10px;
+}
+
+.mini-calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.mini-calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.mini-calendar-weekdays span:first-child { color: var(--sunday-color); }
+.mini-calendar-weekdays span:last-child { color: var(--saturday-color); }
+
+.mini-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.mini-cal-day {
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  padding: 6px 0;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.mini-cal-day:hover { background: var(--bg); }
+.mini-cal-day.other-month { color: var(--text-muted); opacity: 0.5; }
+.mini-cal-day.is-sunday { color: var(--sunday-color); }
+.mini-cal-day.is-saturday { color: var(--saturday-color); }
+.mini-cal-day.is-holiday { color: var(--sunday-color); }
+.mini-cal-day.is-today { box-shadow: inset 0 0 0 1px var(--accent); }
+.mini-cal-day.is-selected { background: var(--accent); color: #fff; font-weight: 600; }
 
 /* ===== 카테고리 검색형 콤보박스 ===== */
 .combobox {
@@ -612,12 +783,61 @@ main { padding: 0 28px; }
   font-weight: 600;
 }
 
+/* ===== 반복 종료 프리셋 선택 ===== */
+.repeat-end-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.repeat-end-btn {
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.repeat-end-btn.selected {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+#repeatEndInput { margin-top: 8px; }
+#repeatEndInput:disabled { background: var(--bg); color: var(--text-muted); }
+
 .field input[type="color"] {
   width: 100%;
   height: 38px;
   padding: 2px;
   border-radius: 8px;
   border: 1px solid var(--border);
+}
+
+.modal-fieldset {
+  border: none;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.modal-fieldset:disabled .field > span,
+.modal-fieldset:disabled .combobox-list,
+.modal-fieldset:disabled .weekday-picker,
+.modal-fieldset:disabled .priority-picker {
+  opacity: 0.6;
+}
+
+.modal-fieldset:disabled input,
+.modal-fieldset:disabled select,
+.modal-fieldset:disabled textarea,
+.modal-fieldset:disabled button {
+  background: var(--bg);
+  cursor: not-allowed;
 }
 
 .modal-actions {
@@ -628,6 +848,11 @@ main { padding: 0 28px; }
 }
 
 .modal-actions-right { display: flex; gap: 8px; }
+
+.view-mode-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
 
 /* ===== 반응형 ===== */
 @media (max-width: 640px) {

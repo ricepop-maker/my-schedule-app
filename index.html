@@ -102,6 +102,7 @@
 </div>
 
 <div id="statusBar" class="status-bar hidden"></div>
+<div id="hoverPreview" class="hover-preview hidden"></div>
 
 <!-- 일정 추가/수정 모달 -->
 <div id="scheduleModal" class="modal-overlay hidden">
@@ -114,6 +115,16 @@
     <form id="scheduleForm">
       <input type="hidden" id="scheduleId">
 
+      <div class="done-field">
+        <label class="checkbox-field">
+          <input type="checkbox" id="doneInput">
+          <span>이 일정 완료</span>
+        </label>
+        <button type="button" id="markAllDoneBtn" class="secondary-btn hidden">전체 완료</button>
+      </div>
+
+      <fieldset id="scheduleFieldset" class="modal-fieldset">
+
       <label class="field">
         <span>제목 <em>*</em></span>
         <input type="text" id="titleInput" required placeholder="일정 제목을 입력하세요">
@@ -121,7 +132,20 @@
 
       <label class="field">
         <span>날짜 <em>*</em></span>
-        <input type="date" id="dateInput" required>
+        <div class="date-picker-wrap" id="datePickerWrap">
+          <input type="text" id="dateInput" required readonly placeholder="날짜를 선택하세요">
+          <div class="mini-calendar hidden" id="miniCalendar">
+            <div class="mini-calendar-header">
+              <button type="button" id="miniCalPrevBtn" class="icon-btn" aria-label="이전 달">‹</button>
+              <span id="miniCalLabel"></span>
+              <button type="button" id="miniCalNextBtn" class="icon-btn" aria-label="다음 달">›</button>
+            </div>
+            <div class="mini-calendar-weekdays">
+              <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
+            </div>
+            <div class="mini-calendar-grid" id="miniCalendarGrid"></div>
+          </div>
+        </div>
       </label>
 
       <label class="field checkbox-field">
@@ -203,10 +227,17 @@
         </div>
       </div>
 
-      <label class="field hidden" id="repeatEndField">
-        <span>반복 종료일</span>
-        <input type="date" id="repeatEndInput">
-      </label>
+      <div class="field hidden" id="repeatEndField">
+        <span>반복 종료</span>
+        <div class="repeat-end-picker" id="repeatEndPicker">
+          <button type="button" class="repeat-end-btn selected" data-preset="infinite">무한</button>
+          <button type="button" class="repeat-end-btn" data-preset="1week">1주일</button>
+          <button type="button" class="repeat-end-btn" data-preset="1month">한달</button>
+          <button type="button" class="repeat-end-btn" data-preset="1year">1년</button>
+          <button type="button" class="repeat-end-btn" data-preset="custom">직접 선택</button>
+        </div>
+        <input type="date" id="repeatEndInput" class="hidden" disabled>
+      </div>
 
       <label class="field">
         <span>알림</span>
@@ -221,7 +252,14 @@
         </select>
       </label>
 
-      <div class="modal-actions">
+      </fieldset>
+
+      <div class="modal-actions" id="viewModeActions">
+        <span class="view-mode-hint">읽기 전용 — 수정하려면 아래 버튼을 눌러주세요</span>
+        <button type="button" id="editScheduleBtn" class="primary-btn">수정</button>
+      </div>
+
+      <div class="modal-actions" id="editModeActions">
         <button type="button" id="deleteScheduleBtn" class="danger-btn hidden">삭제</button>
         <div class="modal-actions-right">
           <button type="button" id="cancelModalBtn" class="secondary-btn">취소</button>
