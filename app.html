@@ -14,15 +14,17 @@
 </head>
 <body>
 
+<div id="userGreeting" class="user-greeting"></div>
+
 <header class="app-header">
-  <h1>내 일정 관리</h1>
+  <h1 id="appTitle">내 일정 관리</h1>
   <div class="header-right">
     <div class="view-tabs">
       <button type="button" class="tab-btn active" data-view="calendar">캘린더</button>
       <button type="button" class="tab-btn" data-view="list">리스트</button>
     </div>
     <button type="button" id="dataManageBtn" class="icon-btn" aria-label="일정 데이터 관리" title="일정 데이터 관리 (내보내기/가져오기)">📁</button>
-    <button type="button" id="themeToggleBtn" class="icon-btn" aria-label="다크 모드 전환" title="다크 모드 전환">🌙</button>
+    <button type="button" id="settingsBtn" class="icon-btn" aria-label="설정" title="설정">⚙</button>
     <button type="button" id="logoutBtn" class="icon-btn logout-btn" aria-label="로그아웃" title="로그아웃">⏻</button>
   </div>
 </header>
@@ -136,23 +138,23 @@
       <label class="field">
         <span>카테고리</span>
         <div class="category-row">
-          <div class="combobox" id="categoryCombobox">
-            <input type="text" id="categorySearchInput" placeholder="카테고리 검색" autocomplete="off">
-            <input type="hidden" id="categoryInput">
-            <ul id="categoryOptionsList" class="combobox-list hidden"></ul>
-          </div>
+          <select id="categoryInput"></select>
+          <button type="button" id="deleteCategoryBtn" class="icon-btn" aria-label="선택한 카테고리 삭제" title="선택한 카테고리 삭제">🗑</button>
           <button type="button" id="newCategoryBtn" class="secondary-btn">+ 새 카테고리</button>
         </div>
       </label>
 
-      <div class="field-row hidden" id="newCategoryFields">
+      <div class="hidden" id="newCategoryFields">
         <label class="field">
           <span>카테고리 이름</span>
           <input type="text" id="newCategoryName" placeholder="예: 운동">
         </label>
         <label class="field">
           <span>색상</span>
-          <input type="color" id="newCategoryColor" value="#4dabf7">
+          <div class="color-save-row">
+            <input type="color" id="newCategoryColor" value="#4dabf7">
+            <button type="button" id="saveNewCategoryBtn" class="secondary-btn">저장</button>
+          </div>
         </label>
       </div>
 

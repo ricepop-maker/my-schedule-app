@@ -20,9 +20,11 @@ function initApp() {
 
 const schedulesRef = db.collection("users").doc(currentUser.uid).collection("schedules");
 const categoriesRef = db.collection("users").doc(currentUser.uid).collection("categories");
+const userProfileRef = db.collection("users").doc(currentUser.uid);
 
 let categories = [];
 let schedules = [];
+let userProfile = {};
 
 // ===== 우선순위 레벨 (고정 3단계, 레벨별 색상) =====
 const PRIORITY_COLORS = { low: "#51cf66", medium: "#f5c518", high: "#ff6b6b" };
@@ -70,9 +72,17 @@ function addCategory(data) {
     .catch(() => { showStatus("카테고리 저장에 실패했습니다"); throw new Error("category-add-failed"); });
 }
 
+function deleteCategory(id) {
+  return categoriesRef.doc(id).delete()
+    .then(() => showStatus("카테고리가 삭제되었습니다"))
+    .catch(() => showStatus("카테고리 삭제에 실패했습니다"));
+}
+
 // ===== Firestore 실시간 구독 =====
+let schedulesReady = false;
 schedulesRef.onSnapshot((snapshot) => {
   schedules = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+  schedulesReady = true;
   // 모달이 열려 있는 동안 다른 곳에서(다른 탭 등) 같은 일정이 바뀌어도 모달 내용이 최신 상태를 반영하도록 동기화
   if (currentEditingSchedule && !scheduleModal.classList.contains("hidden")) {
     const fresh = schedules.find((s) => s.id === currentEditingSchedule.id);
@@ -83,6 +93,7 @@ schedulesRef.onSnapshot((snapshot) => {
     }
   }
   renderAll();
+  renderUserGreeting();
 }, () => showStatus("일정을 불러오지 못했습니다. 네트워크를 확인해주세요"));
 
 let defaultCategoriesSeeded = false;
@@ -94,6 +105,79 @@ categoriesRef.onSnapshot((snapshot) => {
   }
   renderAll();
 }, () => showStatus("카테고리를 불러오지 못했습니다. 네트워크를 확인해주세요"));
+
+// ===== 사용자 프로필 (닉네임 등 설정 페이지에서 관리하는 값) =====
+let profileReady = false;
+userProfileRef.onSnapshot((doc) => {
+  userProfile = doc.data() || {};
+  profileReady = true;
+  renderUserGreeting();
+});
+
+function getDisplayName() {
+  return userProfile.nickname || currentUser.displayName || currentUser.email;
+}
+
+let cachedGreetingTemplate = null;
+
+function renderUserGreeting() {
+  appTitle.textContent = `${getDisplayName()}의 일정`;
+
+  // 일정 데이터와 프로필이 둘 다 최소 한 번은 로딩된 뒤에만 인사말 문구를 무작위로 고르고 캐시함.
+  // (스케줄이 아직 안 실렸을 때 "오늘 일정 없음" 문구로 잘못 굳어버리는 걸 방지)
+  // 이후로는 세션 동안 같은 문구를 유지하고 이름만("{name}" 치환) 최신화함 — 체크박스 클릭 같은
+  // 사소한 변경마다 인사말이 계속 바뀌면 산만하기 때문
+  if (!cachedGreetingTemplate && schedulesReady && profileReady) {
+    cachedGreetingTemplate = pickGreetingTemplate();
+  }
+  userGreeting.textContent = (cachedGreetingTemplate || "{name}님, 안녕하세요").replace("{name}", getDisplayName());
+}
+
+// ===== 일정 상황을 반영한 인사말 (규칙 기반 — 실제 LLM 호출 없이 조건별로 다양한 문구 중 무작위 선택) =====
+function getTodaySchedules() {
+  const todayStr = toDateStr(today);
+  const rangeStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  return schedules.filter((s) => expandRecurring(s, rangeStart, rangeStart).includes(todayStr));
+}
+
+function pickGreetingTemplate() {
+  const hour = today.getHours();
+  const timeGreeting = hour < 12 ? "좋은 아침이에요" : hour < 18 ? "좋은 오후예요" : hour < 22 ? "좋은 저녁이에요" : "늦은 시간이네요";
+
+  const todayStr = toDateStr(today);
+  const undone = getTodaySchedules().filter((s) => !isOccurrenceDone(s, todayStr));
+  const hasUrgent = undone.some((s) => s.priority === "high");
+  const count = undone.length;
+
+  let pool;
+  if (count === 0) {
+    pool = [
+      `{name}님, ${timeGreeting}! 오늘은 예정된 일정이 없어요. 여유롭게 보내세요 ☕`,
+      `{name}님, 오늘 일정이 텅 비어있네요. 푹 쉬어가는 것도 좋아요`,
+      `{name}님, 오늘 하루는 자유롭게 쓰실 수 있어요!`
+    ];
+  } else if (hasUrgent) {
+    pool = [
+      `{name}님, 오늘 중요한 일정이 있어요. 화이팅이에요 💪`,
+      `{name}님, 오늘 우선순위 높은 일정부터 챙겨보세요`,
+      `{name}님, 오늘은 중요한 하루예요. 차근차근 해내실 거예요`
+    ];
+  } else if (count >= 4) {
+    pool = [
+      `{name}님, 오늘 남은 일정이 ${count}개예요. 무리하지 마세요!`,
+      `{name}님, 오늘은 꽤 바쁜 하루네요. 하나씩 차근차근이요`,
+      `{name}님, 일정이 많은 날이에요. 틈틈이 숨 돌리는 것도 잊지 마세요`
+    ];
+  } else {
+    pool = [
+      `{name}님, ${timeGreeting}! 오늘 남은 일정 ${count}개 확인해보세요`,
+      `{name}님, 오늘도 좋은 하루 되세요`,
+      `{name}님, 오늘 일정 잘 챙기시길 바라요`
+    ];
+  }
+
+  return pool[Math.floor(Math.random() * pool.length)];
+}
 
 function seedDefaultCategories() {
   const defaults = [
@@ -120,7 +204,9 @@ const state = {
 const el = (id) => document.getElementById(id);
 
 const logoutBtn = el("logoutBtn");
-const themeToggleBtn = el("themeToggleBtn");
+const settingsBtn = el("settingsBtn");
+const userGreeting = el("userGreeting");
+const appTitle = el("appTitle");
 const exportBtn = el("exportBtn");
 const importBtn = el("importBtn");
 const importFileInput = el("importFileInput");
@@ -168,13 +254,13 @@ const allDayInput = el("allDayInput");
 const timeFields = el("timeFields");
 const startTimeInput = el("startTimeInput");
 const endTimeInput = el("endTimeInput");
-const categorySearchInput = el("categorySearchInput");
 const categoryInput = el("categoryInput");
-const categoryOptionsList = el("categoryOptionsList");
 const newCategoryBtn = el("newCategoryBtn");
+const deleteCategoryBtn = el("deleteCategoryBtn");
 const newCategoryFields = el("newCategoryFields");
 const newCategoryName = el("newCategoryName");
 const newCategoryColor = el("newCategoryColor");
+const saveNewCategoryBtn = el("saveNewCategoryBtn");
 const priorityBtns = document.querySelectorAll(".priority-btn");
 const priorityInput = el("priorityInput");
 const memoInput = el("memoInput");
@@ -251,23 +337,9 @@ logoutBtn.addEventListener("click", () => {
   });
 });
 
-// ===== 다크 모드 =====
-function applyThemeIcon() {
-  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
-  themeToggleBtn.textContent = isDark ? "☀️" : "🌙";
-}
-applyThemeIcon();
-
-themeToggleBtn.addEventListener("click", () => {
-  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
-  if (isDark) {
-    document.documentElement.removeAttribute("data-theme");
-    localStorage.setItem("theme", "light");
-  } else {
-    document.documentElement.setAttribute("data-theme", "dark");
-    localStorage.setItem("theme", "dark");
-  }
-  applyThemeIcon();
+// ===== 설정 페이지 이동 =====
+settingsBtn.addEventListener("click", () => {
+  window.location.href = "settings.html";
 });
 
 // ===== 일정 데이터 관리 모달 (내보내기/가져오기) =====
@@ -819,7 +891,7 @@ function setModalMode(mode) {
 function openModal(schedule, occurrenceDate) {
   scheduleForm.reset();
   newCategoryFields.classList.add("hidden");
-  categoryOptionsList.classList.add("hidden");
+  renderCategoryModalOptions();
   currentEditingSchedule = schedule || null;
   currentOccurrenceDate = schedule ? (occurrenceDate || schedule.date) : null;
 
@@ -831,7 +903,7 @@ function openModal(schedule, occurrenceDate) {
     allDayInput.checked = schedule.allDay;
     startTimeInput.value = schedule.startTime || "";
     endTimeInput.value = schedule.endTime || "";
-    selectCategory(getCategory(schedule.categoryId));
+    categoryInput.value = schedule.categoryId;
     setPrioritySelection(schedule.priority || "medium");
     memoInput.value = schedule.memo || "";
     repeatInput.value = schedule.repeat;
@@ -845,7 +917,7 @@ function openModal(schedule, occurrenceDate) {
     modalTitle.textContent = "일정 추가";
     scheduleIdInput.value = "";
     dateInput.value = state.selectedDate || toDateStr(today);
-    selectCategory(categories[0]);
+    if (categories[0]) categoryInput.value = categories[0].id;
     setPrioritySelection("medium");
     repeatInput.value = "none"; // 새 일정은 항상 반복 없음이 기본값
     setRepeatEndPreset("infinite", dateInput.value);
@@ -990,53 +1062,71 @@ scheduleModal.addEventListener("click", (e) => {
   if (e.target === scheduleModal) closeModal();
 });
 
-// ===== 카테고리 검색형 콤보박스 =====
-function selectCategory(cat) {
-  categoryInput.value = cat.id;
-  categorySearchInput.value = cat.name;
-  categoryOptionsList.classList.add("hidden");
+// ===== 카테고리 선택(셀렉트박스) + 새 카테고리 즉시 저장 =====
+function renderCategoryModalOptions() {
+  const current = categoryInput.value;
+  categoryInput.innerHTML = "";
+  categories.forEach((c) => {
+    const opt = document.createElement("option");
+    opt.value = c.id;
+    opt.textContent = c.name;
+    categoryInput.appendChild(opt);
+  });
+  if (current && categories.some((c) => c.id === current)) categoryInput.value = current;
 }
 
-function renderCategoryOptionsList(filterText) {
-  const keyword = (filterText || "").trim().toLowerCase();
-  const matched = categories.filter((c) => c.name.toLowerCase().includes(keyword));
-
-  categoryOptionsList.innerHTML = "";
-  if (matched.length === 0) {
-    const li = document.createElement("li");
-    li.className = "no-result";
-    li.textContent = "일치하는 카테고리가 없습니다";
-    categoryOptionsList.appendChild(li);
+saveNewCategoryBtn.addEventListener("click", async () => {
+  const name = newCategoryName.value.trim();
+  if (!name) {
+    showStatus("카테고리 이름을 입력해주세요");
     return;
   }
 
-  matched.forEach((c) => {
-    const li = document.createElement("li");
-    const swatch = document.createElement("span");
-    swatch.className = "swatch";
-    swatch.style.background = c.color;
-    li.appendChild(swatch);
-    li.appendChild(document.createTextNode(c.name));
-    li.addEventListener("click", () => selectCategory(c));
-    categoryOptionsList.appendChild(li);
-  });
-}
-
-categorySearchInput.addEventListener("input", () => {
-  categoryInput.value = "";
-  renderCategoryOptionsList(categorySearchInput.value);
-  categoryOptionsList.classList.remove("hidden");
-});
-
-categorySearchInput.addEventListener("focus", () => {
-  renderCategoryOptionsList(categorySearchInput.value);
-  categoryOptionsList.classList.remove("hidden");
-});
-
-document.addEventListener("click", (e) => {
-  if (!el("categoryCombobox").contains(e.target)) {
-    categoryOptionsList.classList.add("hidden");
+  const duplicate = categories.find((c) => c.name.toLowerCase() === name.toLowerCase());
+  if (duplicate) {
+    showStatus(`"${duplicate.name}" 카테고리가 이미 있습니다`);
+    renderCategoryModalOptions();
+    categoryInput.value = duplicate.id; // 중복 대신 기존 카테고리를 바로 선택해줌
+    newCategoryFields.classList.add("hidden");
+    newCategoryName.value = "";
+    newCategoryColor.value = "#4dabf7";
+    return;
   }
+
+  try {
+    const newCatRef = await addCategory({ name, color: newCategoryColor.value });
+    renderCategoryModalOptions();
+    categoryInput.value = newCatRef.id;
+    newCategoryFields.classList.add("hidden");
+    newCategoryName.value = "";
+    newCategoryColor.value = "#4dabf7";
+    showStatus("카테고리가 저장되었습니다");
+  } catch (err) {
+    // addCategory 내부에서 이미 실패 메시지를 표시함
+  }
+});
+
+deleteCategoryBtn.addEventListener("click", () => {
+  const catId = categoryInput.value;
+  if (!catId) return;
+  const cat = getCategory(catId);
+
+  if (categories.length <= 1) {
+    showStatus("카테고리가 최소 1개는 있어야 합니다");
+    return;
+  }
+
+  const inUseCount = schedules.filter((s) => s.categoryId === catId).length;
+  if (inUseCount > 0) {
+    showStatus(`"${cat.name}" 카테고리를 사용 중인 일정이 ${inUseCount}개 있어 삭제할 수 없습니다`);
+    return;
+  }
+
+  if (!window.confirm(`"${cat.name}" 카테고리를 삭제하시겠습니까?`)) return;
+
+  deleteCategory(catId).then(() => {
+    renderCategoryModalOptions(); // 목록이 갱신되면서 자동으로 남은 카테고리 중 첫 번째가 선택됨
+  });
 });
 
 // ===== 우선순위 선택 =====
@@ -1141,22 +1231,11 @@ newCategoryBtn.addEventListener("click", () => {
 });
 
 // ===== 일정 저장 =====
-scheduleForm.addEventListener("submit", async (e) => {
+scheduleForm.addEventListener("submit", (e) => {
   e.preventDefault();
 
   let categoryId = categoryInput.value;
-  if (!newCategoryFields.classList.contains("hidden") && newCategoryName.value.trim()) {
-    try {
-      const newCatRef = await addCategory({
-        name: newCategoryName.value.trim(),
-        color: newCategoryColor.value
-      });
-      categoryId = newCatRef.id;
-    } catch (err) {
-      return; // addCategory 내부에서 이미 실패 메시지를 표시함
-    }
-  }
-  if (!categoryId) categoryId = categories[0].id; // 검색만 하고 선택하지 않은 경우 대비
+  if (!categoryId && categories[0]) categoryId = categories[0].id; // 방어적 대비 (평소엔 select에 항상 값이 있음)
 
   const data = {
     title: titleInput.value.trim(),

@@ -150,6 +150,15 @@ body {
 .google-btn { position: relative; }
 .google-btn .recent-badge { position: absolute; right: 10px; margin-top: 0; }
 
+/* ===== 로그인 사용자 표시줄 ===== */
+.user-greeting {
+  padding: 6px 28px;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
 /* ===== 헤더 ===== */
 .app-header {
   display: flex;
@@ -627,6 +636,8 @@ main { padding: 0 28px; }
 .field input[type="text"],
 .field input[type="date"],
 .field input[type="time"],
+.field input[type="email"],
+.field input[type="password"],
 .field select,
 .field textarea {
   padding: 9px 10px;
@@ -635,6 +646,7 @@ main { padding: 0 28px; }
   font-size: 14px;
   font-family: inherit;
   color: var(--text);
+  background: var(--surface);
 }
 
 .field textarea { resize: vertical; }
@@ -741,62 +753,6 @@ main { padding: 0 28px; }
 .mini-cal-day.is-today { box-shadow: inset 0 0 0 1px var(--accent); }
 .mini-cal-day.is-selected { background: var(--accent); color: #fff; font-weight: 600; }
 
-/* ===== 카테고리 검색형 콤보박스 ===== */
-.combobox {
-  position: relative;
-  flex: 1;
-}
-
-.combobox input[type="text"] {
-  width: 100%;
-}
-
-.combobox-list {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: var(--shadow);
-  margin: 0;
-  padding: 4px;
-  list-style: none;
-  max-height: 180px;
-  overflow-y: auto;
-  z-index: 20;
-}
-
-.combobox-list li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-}
-
-.combobox-list li:hover,
-.combobox-list li.active {
-  background: var(--bg);
-}
-
-.combobox-list .swatch {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.combobox-list .no-result {
-  padding: 8px;
-  font-size: 12px;
-  color: var(--text-muted);
-  cursor: default;
-}
-
 /* ===== 우선순위 선택 ===== */
 .priority-picker {
   display: flex;
@@ -879,6 +835,14 @@ main { padding: 0 28px; }
   border: 1px solid var(--border);
 }
 
+.color-save-row {
+  display: flex;
+  gap: 8px;
+}
+
+.color-save-row input[type="color"] { flex: 1; }
+.color-save-row button { flex-shrink: 0; }
+
 .modal-fieldset {
   border: none;
   padding: 0;
@@ -932,6 +896,80 @@ main { padding: 0 28px; }
   margin: 0 0 12px;
   font-size: 13px;
   color: var(--text-muted);
+}
+
+/* ===== 설정 페이지 ===== */
+.settings-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-title-row h1 { font-size: 18px; margin: 0; }
+
+.settings-main {
+  max-width: 560px;
+  margin: 24px auto;
+  padding: 0 28px 40px;
+}
+
+.settings-inline-form {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-inline-form input[type="text"],
+.settings-inline-form select {
+  flex: 1;
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.settings-inline-form input[type="color"] {
+  width: 44px;
+  height: 38px;
+  padding: 2px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.category-manage-list {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.category-manage-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.category-manage-row input[type="color"] {
+  width: 36px;
+  height: 32px;
+  padding: 2px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.category-manage-row input[type="text"] {
+  flex: 1;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
 }
 
 /* ===== 반응형 ===== */

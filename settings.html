@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>설정 - 내 일정 관리</title>
+<script>
+  // 다크 모드 깜빡임 방지: 스타일시트 적용 전에 먼저 테마 속성을 지정
+  if (localStorage.getItem("theme") === "dark") {
+    document.documentElement.setAttribute("data-theme", "dark");
+  }
+</script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="app-header">
+  <div class="settings-title-row">
+    <button type="button" id="backBtn" class="icon-btn" aria-label="뒤로가기" title="뒤로가기">←</button>
+    <h1>설정</h1>
+  </div>
+</header>
+
+<main class="settings-main">
+
+  <section class="data-section">
+    <h3>계정 정보</h3>
+    <p class="data-section-desc" id="accountInfo"></p>
+  </section>
+
+  <section class="data-section">
+    <h3>닉네임</h3>
+    <p class="data-section-desc">맨 위에 표시될 이름입니다. 비워두면 구글 이름 또는 이메일이 대신 표시됩니다.</p>
+    <div class="settings-inline-form">
+      <input type="text" id="nicknameInput" placeholder="닉네임 입력">
+      <button type="button" id="saveNicknameBtn" class="secondary-btn">저장</button>
+    </div>
+  </section>
+
+  <section class="data-section">
+    <h3>다크 모드</h3>
+    <button type="button" id="themeToggleBtn" class="secondary-btn"></button>
+  </section>
+
+  <section class="data-section">
+    <h3>타임존</h3>
+    <p class="data-section-desc">지금은 저장만 해두는 값이고, 일정 계산에는 아직 반영되지 않습니다 (향후 확장용).</p>
+    <div class="settings-inline-form">
+      <select id="timezoneInput">
+        <option value="Asia/Seoul">Asia/Seoul (서울, 기본)</option>
+        <option value="UTC">UTC</option>
+        <option value="Asia/Tokyo">Asia/Tokyo (도쿄)</option>
+        <option value="America/Los_Angeles">America/Los_Angeles (LA)</option>
+        <option value="America/New_York">America/New_York (뉴욕)</option>
+        <option value="Europe/London">Europe/London (런던)</option>
+      </select>
+      <button type="button" id="saveTimezoneBtn" class="secondary-btn">저장</button>
+    </div>
+  </section>
+
+  <section class="data-section hidden" id="passwordSection">
+    <h3>비밀번호 변경</h3>
+    <form id="passwordForm">
+      <label class="field">
+        <span>현재 비밀번호</span>
+        <input type="password" id="currentPasswordInput" required>
+      </label>
+      <label class="field">
+        <span>새 비밀번호</span>
+        <input type="password" id="newPasswordInput" required placeholder="6자 이상">
+      </label>
+      <label class="field">
+        <span>새 비밀번호 확인</span>
+        <input type="password" id="confirmPasswordInput" required>
+      </label>
+      <p id="passwordError" class="auth-error hidden"></p>
+      <button type="submit" class="primary-btn">비밀번호 변경</button>
+    </form>
+  </section>
+
+  <section class="data-section">
+    <h3>카테고리 관리</h3>
+    <ul id="categoryManageList" class="category-manage-list"></ul>
+    <div class="settings-inline-form">
+      <input type="color" id="manageNewCategoryColor" value="#4dabf7">
+      <input type="text" id="manageNewCategoryName" placeholder="새 카테고리 이름">
+      <button type="button" id="manageAddCategoryBtn" class="secondary-btn">추가</button>
+    </div>
+  </section>
+
+</main>
+
+<div id="statusBar" class="status-bar hidden"></div>
+
+<!-- Firebase SDK (호환 버전) -->
+<script src="https://www.gstatic.com/firebasejs/12.11.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.11.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script src="settings.js"></script>
+</body>
+</html>
