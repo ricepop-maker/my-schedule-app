@@ -8,11 +8,35 @@
   --text: #212529;
   --text-muted: #868e96;
   --danger: #fa5252;
+  --danger-bg: #fff5f5;
+  --danger-border: #ffc9c9;
   --today-bg: #fff3bf;
   --sunday-color: #e03131;
   --saturday-color: #1971c2;
+  --badge-bg: #e7f5ff;
+  --badge-border: #a5d8ff;
   --radius: 10px;
   --shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+}
+
+/* ===== 다크 모드 ===== */
+:root[data-theme="dark"] {
+  --accent: #4dabf7;
+  --accent-dark: #74c0fc;
+  --bg: #16181d;
+  --surface: #1f2229;
+  --border: #2d3138;
+  --text: #e9ecef;
+  --text-muted: #9198a1;
+  --danger: #ff6b6b;
+  --danger-bg: #3a1f1f;
+  --danger-border: #5c2b2b;
+  --today-bg: #4a3f00;
+  --sunday-color: #ff8787;
+  --saturday-color: #74c0fc;
+  --badge-bg: #17293b;
+  --badge-border: #2b4a63;
+  --shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
 }
 
 * { box-sizing: border-box; }
@@ -62,8 +86,8 @@ body {
 .auth-error {
   font-size: 13px;
   color: var(--danger);
-  background: #fff5f5;
-  border: 1px solid #ffc9c9;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
   border-radius: 8px;
   padding: 8px 10px;
   margin: 0 0 12px;
@@ -117,8 +141,8 @@ body {
   margin-top: 8px;
   font-size: 11px;
   color: var(--accent-dark);
-  background: #e7f5ff;
-  border: 1px solid #a5d8ff;
+  background: var(--badge-bg);
+  border: 1px solid var(--badge-border);
   border-radius: 999px;
   padding: 2px 9px;
 }
@@ -239,6 +263,34 @@ body {
   font-size: 13px;
 }
 
+.search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-input {
+  padding: 7px 28px 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  width: 160px;
+}
+
+.search-clear-btn {
+  position: absolute;
+  right: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px;
+}
+
 .primary-btn {
   background: var(--accent);
   color: #fff;
@@ -265,9 +317,9 @@ body {
 .secondary-btn:hover { background: var(--bg); }
 
 .danger-btn {
-  background: #fff5f5;
+  background: var(--danger-bg);
   color: var(--danger);
-  border: 1px solid #ffc9c9;
+  border: 1px solid var(--danger-border);
   padding: 9px 16px;
   border-radius: 8px;
   cursor: pointer;
@@ -311,8 +363,17 @@ main { padding: 0 28px; }
   display: flex;
   flex-direction: column;
   gap: 4px;
-  transition: box-shadow 0.15s;
+  transition: box-shadow 0.15s, background 0.1s;
 }
+
+.calendar-cell.drag-over {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+  background: var(--bg);
+}
+
+.event-chip.is-draggable { cursor: grab; }
+.event-chip.dragging { opacity: 0.35; }
 
 .calendar-cell:hover { box-shadow: var(--shadow); }
 
@@ -851,6 +912,25 @@ main { padding: 0 28px; }
 
 .view-mode-hint {
   font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ===== 일정 데이터 관리 모달 ===== */
+.data-section {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.data-section:last-child { border-bottom: none; padding-bottom: 4px; }
+
+.data-section h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+
+.data-section-desc {
+  margin: 0 0 12px;
+  font-size: 13px;
   color: var(--text-muted);
 }
 

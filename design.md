@@ -17,7 +17,7 @@
 
 **⚠️ 제약사항**: PWA 설치(홈 화면 추가, 서비스워커 등록)는 `file://`로 직접 여는 방식으로는 동작하지 않음. 반드시 http(s)로 서빙되어야 함 (예: 로컬 서버 실행 후 같은 와이파이의 폰에서 접속, 또는 GitHub Pages 등에 배포). 기존 CLAUDE.md의 "index.html을 브라우저로 직접 열기" 방식은 PC에서 기능 확인용으로는 계속 가능하지만, 안드로이드 설치 테스트 시에는 별도 서빙이 필요함.
 
-## 1.2 저장소/인증 방향 (2026-08-19 결정)
+## 1.2 저장소/인증 방향 (2026-08-19 결정, 2026-08-19 실제 연동 완료)
 
 `localStorage` 단독 방식에서 **Firebase(Firestore + Authentication)**로 변경. 이유: 기기 간 동기화, 브라우저 데이터 삭제 시 유실 방지.
 
@@ -25,8 +25,9 @@
 - **인증**: 이메일/비밀번호 로그인 + 구글 로그인(팝업 방식, `signInWithPopup`) 둘 다 지원. 어느 방식으로 로그인해도 같은 Firebase 프로젝트의 Authentication에 계정으로 등록됨. 로그인 전에는 앱 사용 불가 (일정 데이터가 계정에 종속)
 - 구글 로그인을 쓰려면 Firebase 콘솔 > Authentication > Sign-in method에서 "Google" 제공업체를 추가로 활성화해야 함 (사용자가 직접 진행)
 - **호스팅**: Firebase Hosting(무료)으로 배포 → https 주소가 생기므로 [1.1](#11-안드로이드-배포-방향-2026-08-19-결정)에서 언급한 "PWA는 file://로 설치 불가" 문제도 함께 해결됨
-- **오프라인 동작**: Firestore SDK의 오프라인 캐시 기능을 활성화하여, 네트워크 끊겨도 마지막으로 받은 데이터는 조회 가능하고 재연결 시 자동 동기화되도록 함
-- 빌드 도구는 여전히 사용하지 않음: Firebase SDK는 CDN에서 `<script type="module">`로 로드 (npm/번들러 불필요), 이 저장소의 "빌드 시스템 없음" 원칙 유지
+- **오프라인 동작**: `db.enablePersistence()`로 Firestore 오프라인 캐시 활성화. 네트워크 끊겨도 마지막으로 받은 데이터는 조회 가능하고 재연결 시 자동 동기화됨
+- **SDK 로딩 방식 — 모듈(ES module) 대신 호환(compat) 버전 채택**: 처음엔 최신 모듈형 SDK(`import`)를 검토했으나, `<script type="module">`로 우리 자신의 로컬 JS 파일(`auth.js`/`app.js`)을 불러오면 Chrome이 `file://`에서 CORS 오류를 내며 막아버림 — 즉 파일을 더블클릭해서 여는 기존 방식이 완전히 깨짐. 대신 Firebase가 함께 제공하는 **호환(compat) SDK**(`firebase-app-compat.js` 등, 전역 `firebase` 객체 방식)를 일반 `<script src="...">`로 로드해서, `file://`로 바로 열어도 그대로 동작하도록 함. CDN에서 로드하므로 빌드 도구는 여전히 불필요
+- `firebase-config.js`는 ES 모듈이 아닌 일반 스크립트로 변경 (`export` 제거, `firebaseConfig`를 전역 변수로 노출)
 
 ## 1.3 공휴일 데이터 소스 결정 (2026-08-19)
 
@@ -85,6 +86,7 @@
 - 로그인 성공 시 해당 계정의 Firestore 데이터를 불러와 본 화면 표시
 - Firebase Auth 에러(잘못된 비밀번호, 이미 존재하는 이메일 등)를 한글 메시지로 변환해 표시
 - **최근 로그인 방법 표시**: 로그인에 성공하면 사용한 방식(`email` 또는 `google`)을 `localStorage`에 기록해두고, 다음 방문 시 로그인 화면에서 그 방식의 버튼 옆에 "최근에 사용함" 배지를 표시 (기기별 UI 편의 기능이라 Firestore가 아닌 localStorage에 저장)
+- **⚠️ file://에서 구글 로그인 팝업 제약**: 이메일/비밀번호 로그인은 `file://`로 직접 열어도 대체로 동작하지만, 구글 로그인(`signInWithPopup`)은 팝업-원본 창 간 통신에 정상적인 http(s) origin이 필요해서 `file://`에서는 실패할 가능성이 높음. 구글 로그인까지 테스트하려면 로컬 서버(예: `python -m http.server`)나 Firebase Hosting으로 서빙해서 접속해야 함
 
 ### 2.5 일정 추가/수정 모달(팝업)
 
@@ -135,6 +137,8 @@ users/{uid}/categories/{categoryId}  — 카테고리 문서
   "repeatEndDate": "2026-12-31 또는 빈 문자열 (반복 종료일. 빈 문자열=무한 반복이 기본값)",
   "customDays": "[0,2,4] (repeat이 custom일 때만 사용. 0=일 ~ 6=토)",
   "alarm": "none | onTime | 5min | 10min | 30min | 1hour | 1day",
+  "ownerId": "생성한 사용자 uid (그룹 기능 대비 예약 필드, 현재는 미리보기용 임시값 \"me\")",
+  "groupId": "null 이면 개인 일정, 값이 있으면 해당 그룹에 공유된 일정 (그룹 기능 대비 예약 필드, 아직 UI 없음)",
   "createdAt": "Firestore Timestamp"
 }
 ```
@@ -154,6 +158,20 @@ users/{uid}/categories/{categoryId}  — 카테고리 문서
 - 반복 종류: `daily`(매일) / `weekly`(매주, 시작일과 같은 요일) / `monthly`(매월, 같은 날짜) / `weekday`(주중, 월~금만) / `custom`(요일 직접 선택, `customDays`에 저장된 요일에만 생성)
 - Firestore 보안 규칙: `request.auth.uid == uid` 인 경우에만 해당 사용자의 `users/{uid}/**` 문서 읽기/쓰기 허용, 그 외 모두 거부
 
+```
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}
+```
+
+⚠️ 위 규칙은 아직 Firebase 콘솔에 실제로 반영되지 않음 — 처음 Firestore를 만들 때 "테스트 모드"(30일간 전체 공개)로 시작했으므로, **Firestore Database > 규칙 탭에서 위 내용으로 직접 교체해야 함** (Claude가 대신 할 수 없는 콘솔 작업)
+- **⚠️ 그룹 기능 관련 미해결 사항**: 지금의 `users/{uid}/schedules` 구조는 "일정은 항상 만든 사람 소유"를 전제로 함. 그룹 일정처럼 여러 사용자가 같이 봐야 하는 경우엔 이 구조로는 안 맞아서, 실제 그룹 기능을 만들 때는 `groups/{groupId}/schedules` 같은 별도 컬렉션이나 공유 참조 방식을 다시 설계해야 함. `groupId` 필드는 우선 자리만 잡아둔 상태 ([9.1](#91-기본-확장) 참고)
+
 ## 4. 주요 기능 명세
 
 | 기능 | 설명 |
@@ -167,6 +185,10 @@ users/{uid}/categories/{categoryId}  — 카테고리 문서
 | 카테고리 검색 | 일정 모달 내 카테고리 선택을 검색형 콤보박스로 제공 |
 | 우선순위 | 낮음/보통/높음 3단계, 레벨별 고정 색상으로 캘린더·리스트에 표시 |
 | 완료 처리 | 회차 단위로 완료 표시/해제(완료 시 취소선+흐리게), 반복 일정은 "전체 완료"로 모든 회차 일괄 처리 가능 |
+| 일정 검색 | 제목·메모·카테고리명 기준으로 전체 일정(월 무관) 검색, 검색 중엔 자동으로 리스트뷰에 결과 표시 |
+| JSON 내보내기/가져오기 | 헤더의 "데이터 관리" 버튼으로 여는 전용 팝업에서 진행. 내보내기는 전체 일정+카테고리를 JSON 파일로 다운로드, 가져오기는 파일 선택 시 기존 일정에 추가 병합(카테고리는 이름 같으면 재사용, id 충돌 시 새 id 발급) |
+| 다크 모드 | 헤더의 토글 버튼으로 전환, localStorage에 저장해 다음 방문 시에도 유지, 로그인 화면에도 동일하게 적용 |
+| 드래그 앤 드롭 이동 | 캘린더에서 일정 칩을 다른 날짜 칸으로 드래그하면 날짜 변경. **반복 없는 일정만 가능** (반복 일정은 특정 회차만 옮기는 게 데이터 모델상 불가해 제외) |
 | 브라우저 알림 | Notification API로 설정된 시각에 알림 표시 (권한 요청 필요) |
 | 데이터 영속성/동기화 | Firestore 자동 저장 + 실시간 동기화(`onSnapshot`), 오프라인 캐시 지원 |
 
@@ -180,9 +202,11 @@ users/{uid}/categories/{categoryId}  — 카테고리 문서
 
 ```
 testapp/
-├── index.html       # 메인 페이지 구조 (로그인 화면, 헤더, 툴바, 캘린더/리스트 컨테이너, 모달)
-├── style.css         # 전체 스타일 (레이아웃, 캘린더 그리드, 모달, 색상 팔레트)
-├── main.js           # 앱 로직 (Firebase 초기화, 인증, Firestore 연동, 렌더링, 이벤트 처리)
+├── index.html       # 로그인/회원가입 화면 전용 페이지 (진입점)
+├── app.html          # 앱 본 화면 (헤더, 툴바, 캘린더/리스트 컨테이너, 모달) — 로그인 성공 후 이동하는 페이지
+├── style.css         # 전체 스타일 (레이아웃, 캘린더 그리드, 모달, 색상 팔레트) — 두 페이지 공용
+├── auth.js           # index.html 전용 로직 (Firebase Authentication으로 로그인/회원가입/구글 로그인, 성공 시 app.html로 이동)
+├── app.js            # app.html 전용 로직 (Firestore 실시간 연동, 렌더링, 모달, 캘린더 등 나머지 전체)
 ├── firebase-config.js # Firebase 프로젝트 설정값(apiKey 등) — 별도 파일로 분리해 관리
 ├── manifest.json     # PWA 설치를 위한 앱 메타데이터 (이름, 아이콘, 테마색, standalone 모드)
 ├── sw.js             # 서비스 워커 (오프라인 캐싱, PWA 설치 요건 충족용)
@@ -191,17 +215,22 @@ testapp/
 
 - 기존 프로젝트 컨벤션과 동일하게 이 폴더 안에서 독립적으로 완결되는 구조 (다른 폴더와 공유 코드 없음)
 - `manifest.json`/`sw.js`/`icons/`/`firebase-config.js`는 이번에 새로 추가되는 부분 (기존 프로젝트들엔 없던 구성)
+- **페이지 분리(2026-08-19)**: 원래 `index.html` 한 파일에 로그인 화면과 앱 본 화면을 모두 넣고 JS로 보이기/숨기기 전환했으나, 로그인 화면(`index.html`)과 앱 본 화면(`app.html`)을 별도 HTML 페이지로 분리함. 로그인 성공 시 `app.html`로 `location.href` 이동, 로그아웃 시 반대로 이동. 지금은(미리보기 단계) `localStorage`의 `mockLoggedIn` 플래그로 로그인 여부를 흉내내고 있고, `app.html`을 로그인 없이 직접 열면 `index.html`로 되돌아감. Firebase Authentication 연동 후에는 이 부분이 실제 인증 상태 체크로 교체될 예정
 - `firebase-config.js`의 값들은 Firebase 콘솔에서 프로젝트 생성 후 사용자가 직접 발급받아 채워 넣어야 함 (Claude가 임의로 만들 수 없는 값)
 
-## 7. 상태 관리 (main.js 내부 구조 개략)
+## 7. 상태 관리 (app.js / auth.js 내부 구조 개략)
 
-- `state.user`: 현재 로그인한 Firebase 사용자 (없으면 로그인 화면 표시)
-- `state.schedules`: 전체 일정 배열 (Firestore `onSnapshot`으로 실시간 반영)
-- `state.categories`: 카테고리 목록
+**auth.js** — `auth.onAuthStateChanged()`로 이미 로그인된 세션이면 app.html로 자동 이동. 로그인/회원가입/구글 로그인은 각 버튼의 이벤트 리스너 안에서 `auth.signInWithEmailAndPassword()` / `auth.createUserWithEmailAndPassword()` / `auth.signInWithPopup()`을 직접 호출 (별도 래퍼 함수로 감싸지 않음). 실패 시 `showAuthError(err)`가 Firebase 에러 코드를 한글 메시지로 변환
+
+**app.js**
+- `currentUser`: 현재 로그인한 Firebase 사용자 (없으면 `auth.onAuthStateChanged()`에서 `index.html`로 리다이렉트, 있으면 `initApp()` 실행)
+- `schedules` / `categories`: Firestore `users/{uid}/schedules`, `users/{uid}/categories`를 `onSnapshot`으로 구독해 실시간 반영되는 배열
 - `state.currentView`: `'calendar' | 'list'` (기기별 UI 설정이라 localStorage에 저장)
-- `state.currentMonth`: 현재 표시 중인 년/월
-- `state.selectedDate`: 캘린더에서 선택한 날짜
-- 주요 함수: `signUp()`, `signIn()`, `signInWithGoogle()`, `signOut()`, `subscribeSchedules()`(onSnapshot 구독), `addSchedule()`, `updateSchedule()`, `deleteSchedule()`, `renderCalendar()`, `renderList()`, `openModal(schedule?)`, `expandRecurring(schedule, rangeStart, rangeEnd)`, `checkAlarms()`
+- `state.currentMonth`, `state.selectedDate`, `state.categoryFilter`, `state.searchQuery`
+- 일정 CRUD: `addSchedule(data)` / `updateSchedule(id, changes)` / `deleteSchedule(id)` / `addCategory(data)`가 Firestore를 직접 호출 (성공 시 별도 재렌더링 호출 불필요 — `onSnapshot`이 감지해서 자동으로 `renderAll()`을 실행함). 폼 저장/삭제/JSON 가져오기가 모두 이 함수들만 거치도록 통일해서, 나중에 자연어 일정 등록(AI)이나 그룹 동기화 로직이 추가돼도 이 함수들만 호출하면 되게 함
+- 첫 로그인 시 `categories` 스냅샷이 비어있으면 `seedDefaultCategories()`가 기본 카테고리 4개를 자동 생성
+- 렌더링: `renderCalendar()`, `renderList()`, `openModal(schedule?, occurrenceDate?)`, `expandRecurring(schedule, rangeStart, rangeEnd)`
+- (미구현) `checkAlarms()`: 브라우저 알림 기능은 아직 범위 밖 ([향후 확장](#9-향후-확장-가능-항목-이번-범위-제외) 참고)
 
 ## 8. 실행 시 상태 메시지 (한글 표시, CLAUDE.md 규칙 준수)
 
@@ -219,10 +248,6 @@ testapp/
 
 ### 9.1 기본 확장
 
-- 일정 검색
-- 일정 데이터 내보내기/가져오기(JSON 파일)
-- 다크 모드
-- 드래그 앤 드롭으로 날짜 이동
 - 그룹 만들기, 초대, 일정 공유, 개인일정 그룹일정 선택 기능
 - 그룹일정은 그룹에게 공유, 개인일정은 옵션으로 공유 선택
 
@@ -255,6 +280,11 @@ testapp/
 
 설계가 바뀔 때마다 날짜와 함께 기록. 최신 항목이 위로 오도록 추가.
 
+- **2026-08-19**: 미리보기(가짜 로그인 + 메모리 데이터)를 실제 Firebase Authentication + Firestore 연동으로 교체 — `auth.js`가 실제 이메일/비밀번호·구글 로그인을 처리하고, `app.js`는 일정/카테고리를 Firestore 실시간 구독(`onSnapshot`)으로 불러와 렌더링. `addSchedule`/`updateSchedule`/`deleteSchedule`/`addCategory`가 로컬 배열 대신 Firestore를 직접 호출하도록 변경. 최신 모듈형 SDK 대신 호환(compat) SDK를 채택해 `file://`로 직접 여는 기존 방식을 유지함 (알림/PWA는 이번 범위 밖)
+- **2026-08-19**: 향후 그룹/AI 기능 확장 대비 리팩토링 — 일정 생성/수정/삭제를 `addSchedule()`/`updateSchedule()`/`deleteSchedule()`로 중앙화(폼 저장·삭제·JSON 가져오기가 모두 이 함수들을 거침), 일정 데이터에 `ownerId`/`groupId` 예약 필드 추가, 그룹 기능이 지금의 Firestore 구조(`users/{uid}/schedules`)와 안 맞는다는 점을 데이터 모델 섹션에 명시
+- **2026-08-19**: JSON 내보내기/가져오기를 헤더 아이콘 버튼 즉시 실행 방식에서, 전용 "일정 데이터 관리" 팝업 안의 버튼으로 변경 (내보내기/가져오기 버튼을 한 곳에 모음)
+- **2026-08-19**: 향후 확장 항목이었던 4가지를 이번 범위로 승격해 구현 — 일정 검색(제목/메모/카테고리명), JSON 내보내기/가져오기(병합 방식), 다크 모드(헤더 토글, localStorage 저장), 드래그 앤 드롭 날짜 이동(반복 없는 일정만)
+- **2026-08-19**: `index.html`을 로그인 화면 전용으로 남기고, 앱 본 화면(헤더/툴바/캘린더·리스트/모달)을 `app.html`로 분리 — 로그인 성공 시 `app.html`로 이동, 로그아웃 시 `index.html`로 복귀. JS도 `auth.js`(로그인) / `app.js`(나머지 전체)로 함께 분리, 기존 `main.js`는 제거
 - **2026-08-19**: 향후 확장 항목에 개인용/팀용 AI 기능(자연어 일정 등록, 습관 방어, 마감일 기반 자동 재배치, 팀 가용시간 교집합, 회의 클러스터링 등)과 SI 프로젝트 관리용 확장(마일스톤 리스크 경보, 미팅 브리핑 자동화, 투입시간 리포트) 정리해서 추가
 - **2026-08-19**: (버그 수정) Nager.Date가 대체공휴일을 원래 명칭으로만 표시하던 문제 수정 — 양력 고정 공휴일의 원래 날짜와 비교해 다르면 "대체공휴일(광복절)"처럼 이름 보정
 - **2026-08-19**: 일정 모달의 날짜 입력을 브라우저 기본 달력 대신 앱 디자인과 통일된 커스텀 미니 달력 팝업으로 변경 (요일 색상·공휴일 표시도 동일하게 반영)

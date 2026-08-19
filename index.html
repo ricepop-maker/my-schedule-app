@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>개인 일정 스케줄 관리</title>
+<script>
+  // 다크 모드 깜빡임 방지: 스타일시트 적용 전에 먼저 테마 속성을 지정
+  if (localStorage.getItem("theme") === "dark") {
+    document.documentElement.setAttribute("data-theme", "dark");
+  }
+</script>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -42,234 +48,16 @@
         <path fill="#FBBC05" d="M3.95 10.7A5.4 5.4 0 0 1 3.67 9c0-.59.1-1.17.28-1.7V4.97H.9A9 9 0 0 0 0 9c0 1.45.35 2.83.9 4.03l3.05-2.33z"/>
         <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0A9 9 0 0 0 .9 4.97l3.05 2.33C4.66 5.17 6.65 3.58 9 3.58z"/>
       </svg>
-      <span>구글로 로그인</span>
+      <span>구글 로그인</span>
       <span id="googleRecentBadge" class="recent-badge hidden">최근에 사용함</span>
     </button>
   </div>
 </section>
 
-<!-- 앱 본 화면 -->
-<div id="appScreen" class="hidden">
-  <header class="app-header">
-    <h1>내 일정 관리</h1>
-    <div class="header-right">
-      <div class="view-tabs">
-        <button type="button" class="tab-btn active" data-view="calendar">캘린더</button>
-        <button type="button" class="tab-btn" data-view="list">리스트</button>
-      </div>
-      <button type="button" id="logoutBtn" class="icon-btn logout-btn" aria-label="로그아웃" title="로그아웃">⏻</button>
-    </div>
-  </header>
-
-  <div class="toolbar">
-    <div class="month-nav">
-      <button type="button" id="prevMonthBtn" class="icon-btn" aria-label="이전 달">‹</button>
-      <span id="currentMonthLabel" class="month-label"></span>
-      <button type="button" id="nextMonthBtn" class="icon-btn" aria-label="다음 달">›</button>
-      <button type="button" id="todayBtn" class="today-btn">오늘</button>
-    </div>
-    <div class="toolbar-actions">
-      <select id="categoryFilter" class="category-filter">
-        <option value="all">전체 카테고리</option>
-      </select>
-      <button type="button" id="addScheduleBtn" class="primary-btn">+ 일정 추가</button>
-    </div>
-  </div>
-
-  <main>
-    <!-- 캘린더 뷰 -->
-    <section id="calendarView" class="view-panel">
-      <div class="calendar-weekdays">
-        <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
-      </div>
-      <div id="calendarGrid" class="calendar-grid"></div>
-
-      <div id="dayDetailPanel" class="day-detail-panel hidden">
-        <div class="day-detail-header">
-          <h3 id="dayDetailTitle"></h3>
-          <button type="button" id="closeDayDetailBtn" class="icon-btn" aria-label="닫기">×</button>
-        </div>
-        <ul id="dayDetailList" class="day-detail-list"></ul>
-      </div>
-    </section>
-
-    <!-- 리스트 뷰 -->
-    <section id="listView" class="view-panel hidden">
-      <ul id="scheduleList" class="schedule-list"></ul>
-      <p id="listEmptyMsg" class="empty-msg hidden">이 달에 등록된 일정이 없습니다</p>
-    </section>
-  </main>
-</div>
-
-<div id="statusBar" class="status-bar hidden"></div>
-<div id="hoverPreview" class="hover-preview hidden"></div>
-
-<!-- 일정 추가/수정 모달 -->
-<div id="scheduleModal" class="modal-overlay hidden">
-  <div class="modal">
-    <div class="modal-header">
-      <h2 id="modalTitle">일정 추가</h2>
-      <button type="button" id="closeModalBtn" class="icon-btn" aria-label="닫기">×</button>
-    </div>
-
-    <form id="scheduleForm">
-      <input type="hidden" id="scheduleId">
-
-      <div class="done-field">
-        <label class="checkbox-field">
-          <input type="checkbox" id="doneInput">
-          <span>이 일정 완료</span>
-        </label>
-        <button type="button" id="markAllDoneBtn" class="secondary-btn hidden">전체 완료</button>
-      </div>
-
-      <fieldset id="scheduleFieldset" class="modal-fieldset">
-
-      <label class="field">
-        <span>제목 <em>*</em></span>
-        <input type="text" id="titleInput" required placeholder="일정 제목을 입력하세요">
-      </label>
-
-      <label class="field">
-        <span>날짜 <em>*</em></span>
-        <div class="date-picker-wrap" id="datePickerWrap">
-          <input type="text" id="dateInput" required readonly placeholder="날짜를 선택하세요">
-          <div class="mini-calendar hidden" id="miniCalendar">
-            <div class="mini-calendar-header">
-              <button type="button" id="miniCalPrevBtn" class="icon-btn" aria-label="이전 달">‹</button>
-              <span id="miniCalLabel"></span>
-              <button type="button" id="miniCalNextBtn" class="icon-btn" aria-label="다음 달">›</button>
-            </div>
-            <div class="mini-calendar-weekdays">
-              <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
-            </div>
-            <div class="mini-calendar-grid" id="miniCalendarGrid"></div>
-          </div>
-        </div>
-      </label>
-
-      <label class="field checkbox-field">
-        <input type="checkbox" id="allDayInput">
-        <span>종일 일정</span>
-      </label>
-
-      <div class="field-row" id="timeFields">
-        <label class="field">
-          <span>시작 시간</span>
-          <input type="time" id="startTimeInput">
-        </label>
-        <label class="field">
-          <span>종료 시간</span>
-          <input type="time" id="endTimeInput">
-        </label>
-      </div>
-
-      <label class="field">
-        <span>카테고리</span>
-        <div class="category-row">
-          <div class="combobox" id="categoryCombobox">
-            <input type="text" id="categorySearchInput" placeholder="카테고리 검색" autocomplete="off">
-            <input type="hidden" id="categoryInput">
-            <ul id="categoryOptionsList" class="combobox-list hidden"></ul>
-          </div>
-          <button type="button" id="newCategoryBtn" class="secondary-btn">+ 새 카테고리</button>
-        </div>
-      </label>
-
-      <div class="field-row hidden" id="newCategoryFields">
-        <label class="field">
-          <span>카테고리 이름</span>
-          <input type="text" id="newCategoryName" placeholder="예: 운동">
-        </label>
-        <label class="field">
-          <span>색상</span>
-          <input type="color" id="newCategoryColor" value="#4dabf7">
-        </label>
-      </div>
-
-      <label class="field">
-        <span>우선순위</span>
-        <div class="priority-picker" id="priorityPicker">
-          <button type="button" class="priority-btn" data-priority="low">낮음</button>
-          <button type="button" class="priority-btn selected" data-priority="medium">보통</button>
-          <button type="button" class="priority-btn" data-priority="high">높음</button>
-        </div>
-        <input type="hidden" id="priorityInput" value="medium">
-      </label>
-
-      <label class="field">
-        <span>메모</span>
-        <textarea id="memoInput" rows="3" placeholder="상세 설명을 입력하세요"></textarea>
-      </label>
-
-      <label class="field">
-        <span>반복</span>
-        <select id="repeatInput">
-          <option value="none">반복 없음</option>
-          <option value="daily">매일</option>
-          <option value="weekly">매주</option>
-          <option value="monthly">매월</option>
-          <option value="weekday">주중(월~금)</option>
-          <option value="custom">요일 선택</option>
-        </select>
-      </label>
-
-      <div class="field hidden" id="customDaysField">
-        <span>반복 요일</span>
-        <div class="weekday-picker">
-          <button type="button" class="weekday-btn" data-day="0">일</button>
-          <button type="button" class="weekday-btn" data-day="1">월</button>
-          <button type="button" class="weekday-btn" data-day="2">화</button>
-          <button type="button" class="weekday-btn" data-day="3">수</button>
-          <button type="button" class="weekday-btn" data-day="4">목</button>
-          <button type="button" class="weekday-btn" data-day="5">금</button>
-          <button type="button" class="weekday-btn" data-day="6">토</button>
-        </div>
-      </div>
-
-      <div class="field hidden" id="repeatEndField">
-        <span>반복 종료</span>
-        <div class="repeat-end-picker" id="repeatEndPicker">
-          <button type="button" class="repeat-end-btn selected" data-preset="infinite">무한</button>
-          <button type="button" class="repeat-end-btn" data-preset="1week">1주일</button>
-          <button type="button" class="repeat-end-btn" data-preset="1month">한달</button>
-          <button type="button" class="repeat-end-btn" data-preset="1year">1년</button>
-          <button type="button" class="repeat-end-btn" data-preset="custom">직접 선택</button>
-        </div>
-        <input type="date" id="repeatEndInput" class="hidden" disabled>
-      </div>
-
-      <label class="field">
-        <span>알림</span>
-        <select id="alarmInput">
-          <option value="none">알림 없음</option>
-          <option value="onTime">정시</option>
-          <option value="5min">5분 전</option>
-          <option value="10min">10분 전</option>
-          <option value="30min">30분 전</option>
-          <option value="1hour">1시간 전</option>
-          <option value="1day">1일 전</option>
-        </select>
-      </label>
-
-      </fieldset>
-
-      <div class="modal-actions" id="viewModeActions">
-        <span class="view-mode-hint">읽기 전용 — 수정하려면 아래 버튼을 눌러주세요</span>
-        <button type="button" id="editScheduleBtn" class="primary-btn">수정</button>
-      </div>
-
-      <div class="modal-actions" id="editModeActions">
-        <button type="button" id="deleteScheduleBtn" class="danger-btn hidden">삭제</button>
-        <div class="modal-actions-right">
-          <button type="button" id="cancelModalBtn" class="secondary-btn">취소</button>
-          <button type="submit" class="primary-btn">저장</button>
-        </div>
-      </div>
-    </form>
-  </div>
-</div>
-
-<script src="main.js"></script>
+<!-- Firebase SDK (호환 버전 — file://로 직접 열어도 동작하도록 일반 스크립트로 로드) -->
+<script src="https://www.gstatic.com/firebasejs/12.11.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.11.0/firebase-auth-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script src="auth.js"></script>
 </body>
 </html>

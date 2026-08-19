@@ -1,15 +1,28 @@
-// ===== [미리보기 버전] =====
-// 지금은 디자인/동작 흐름 확인용 임시 버전입니다.
-// 로그인은 실제 인증 없이 화면만 전환하고, 일정 데이터는 메모리에만 저장됩니다(새로고침하면 초기화).
-// 디자인 확정 후 Firebase Authentication + Firestore 연동으로 교체될 예정입니다.
+// ===== 앱 본 화면 스크립트 (Firebase Authentication + Firestore 연동) =====
 
-// ===== 기본 카테고리 (사용자가 추가한 것처럼 목록에 계속 쌓임) =====
-let categories = [
-  { id: "work", name: "업무", color: "#4dabf7" },
-  { id: "personal", name: "개인", color: "#51cf66" },
-  { id: "appointment", name: "약속", color: "#ff922b" },
-  { id: "etc", name: "기타", color: "#adb5bd" }
-];
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+db.enablePersistence().catch(() => {}); // 오프라인 캐시. 같은 브라우저에 탭이 여러 개 열려 있으면 실패할 수 있어 조용히 무시
+
+let currentUser = null;
+
+auth.onAuthStateChanged((user) => {
+  if (!user) {
+    window.location.href = "index.html";
+    return;
+  }
+  currentUser = user;
+  initApp();
+});
+
+function initApp() {
+
+const schedulesRef = db.collection("users").doc(currentUser.uid).collection("schedules");
+const categoriesRef = db.collection("users").doc(currentUser.uid).collection("categories");
+
+let categories = [];
+let schedules = [];
 
 // ===== 우선순위 레벨 (고정 3단계, 레벨별 색상) =====
 const PRIORITY_COLORS = { low: "#51cf66", medium: "#f5c518", high: "#ff6b6b" };
@@ -26,57 +39,96 @@ function toDateStr(date) {
   return `${y}-${m}-${d}`;
 }
 
-// ===== 샘플 일정 데이터 (디자인 확인용) =====
 const today = new Date();
-function sampleDate(offsetDays) {
-  const d = new Date(today);
-  d.setDate(d.getDate() + offsetDays);
-  return toDateStr(d);
+
+// ===== 일정 CRUD (Firestore 연동, 그룹/AI 기능 확장 대비) =====
+// 나중에 자연어 파싱("다음주 화요일 3시에 미팅" 등)이나 그룹 일정 동기화 로직이 들어와도
+// 폼 제출/JSON 가져오기와 동일하게 이 함수들만 호출하면 되도록 일정 생성/수정/삭제를 한 곳으로 모음.
+function addSchedule(data) {
+  const { id, ...rest } = data; // Firestore가 문서 id를 자동 부여하므로, 넘어온 id(예: JSON 가져오기)는 무시
+  return schedulesRef.add({
+    doneDates: [],
+    groupId: null, // 그룹 공유 일정이면 그룹 id, 개인 일정이면 null (그룹 기능 자리만 미리 확보)
+    ...rest,
+    ownerId: currentUser.uid,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  }).catch(() => showStatus("일정 저장에 실패했습니다. 네트워크를 확인해주세요"));
 }
 
-let schedules = [
-  {
-    id: "s1", title: "팀 주간회의", date: sampleDate(0), startTime: "10:00", endTime: "11:00",
-    allDay: false, categoryId: "work", priority: "high", doneDates: [], memo: "주간 업무 공유", repeat: "weekly", repeatEndDate: "",
-    alarm: "10min"
-  },
-  {
-    id: "s2", title: "치과 예약", date: sampleDate(2), startTime: "15:30", endTime: "16:00",
-    allDay: false, categoryId: "appointment", priority: "medium", doneDates: [], memo: "정기 검진", repeat: "none", repeatEndDate: "",
-    alarm: "1hour"
-  },
-  {
-    id: "s3", title: "친구 생일", date: sampleDate(5), startTime: "", endTime: "",
-    allDay: true, categoryId: "personal", priority: "low", doneDates: [], memo: "선물 준비하기", repeat: "none", repeatEndDate: "",
-    alarm: "1day"
-  },
-  {
-    // 반복 일정의 완료는 회차별로 관리됨: 어제 회차만 완료 표시된 예시
-    id: "s4", title: "헬스장", date: sampleDate(-1), startTime: "07:00", endTime: "08:00",
-    allDay: false, categoryId: "personal", priority: "low", doneDates: [sampleDate(-1)], memo: "", repeat: "daily", repeatEndDate: "",
-    alarm: "none"
+function updateSchedule(id, changes) {
+  return schedulesRef.doc(id).update(changes)
+    .catch(() => showStatus("일정 저장에 실패했습니다. 네트워크를 확인해주세요"));
+}
+
+function deleteSchedule(id) {
+  return schedulesRef.doc(id).delete()
+    .catch(() => showStatus("일정 삭제에 실패했습니다. 네트워크를 확인해주세요"));
+}
+
+function addCategory(data) {
+  return categoriesRef.add(data)
+    .catch(() => { showStatus("카테고리 저장에 실패했습니다"); throw new Error("category-add-failed"); });
+}
+
+// ===== Firestore 실시간 구독 =====
+schedulesRef.onSnapshot((snapshot) => {
+  schedules = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+  // 모달이 열려 있는 동안 다른 곳에서(다른 탭 등) 같은 일정이 바뀌어도 모달 내용이 최신 상태를 반영하도록 동기화
+  if (currentEditingSchedule && !scheduleModal.classList.contains("hidden")) {
+    const fresh = schedules.find((s) => s.id === currentEditingSchedule.id);
+    if (fresh) {
+      currentEditingSchedule = fresh;
+      doneInput.checked = isOccurrenceDone(currentEditingSchedule, currentOccurrenceDate);
+      updateMarkAllDoneButton();
+    }
   }
-];
+  renderAll();
+}, () => showStatus("일정을 불러오지 못했습니다. 네트워크를 확인해주세요"));
+
+let defaultCategoriesSeeded = false;
+categoriesRef.onSnapshot((snapshot) => {
+  categories = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+  if (categories.length === 0 && !defaultCategoriesSeeded) {
+    defaultCategoriesSeeded = true; // 초기 스냅샷이 캐시/서버 두 번 도착해도 기본 카테고리가 중복 생성되지 않도록 함
+    seedDefaultCategories();
+  }
+  renderAll();
+}, () => showStatus("카테고리를 불러오지 못했습니다. 네트워크를 확인해주세요"));
+
+function seedDefaultCategories() {
+  const defaults = [
+    { name: "업무", color: "#4dabf7" },
+    { name: "개인", color: "#51cf66" },
+    { name: "약속", color: "#ff922b" },
+    { name: "기타", color: "#adb5bd" }
+  ];
+  const batch = db.batch();
+  defaults.forEach((cat) => batch.set(categoriesRef.doc(), cat));
+  batch.commit().catch(() => showStatus("기본 카테고리 생성에 실패했습니다"));
+}
 
 // ===== 상태 =====
 const state = {
-  loggedIn: false,
   currentView: localStorage.getItem("currentView") || "calendar",
   currentMonth: new Date(today.getFullYear(), today.getMonth(), 1),
   selectedDate: null,
-  categoryFilter: "all"
+  categoryFilter: "all",
+  searchQuery: ""
 };
 
 // ===== 엘리먼트 참조 =====
 const el = (id) => document.getElementById(id);
 
-const authScreen = el("authScreen");
-const appScreen = el("appScreen");
-const authForm = el("authForm");
-const authError = el("authError");
-const loginBtn = el("loginBtn");
-const signupBtn = el("signupBtn");
 const logoutBtn = el("logoutBtn");
+const themeToggleBtn = el("themeToggleBtn");
+const exportBtn = el("exportBtn");
+const importBtn = el("importBtn");
+const importFileInput = el("importFileInput");
+const searchInput = el("searchInput");
+const searchClearBtn = el("searchClearBtn");
+const dataManageBtn = el("dataManageBtn");
+const dataModal = el("dataModal");
+const closeDataModalBtn = el("closeDataModalBtn");
 
 const tabBtns = document.querySelectorAll(".tab-btn");
 const calendarView = el("calendarView");
@@ -192,51 +244,46 @@ function hideHoverPreview() {
   hoverHideTimer = setTimeout(() => hoverPreview.classList.add("hidden"), 120);
 }
 
-// ===== 로그인 화면 (미리보기: 실제 인증 없음) =====
-authForm.addEventListener("submit", (e) => {
-  e.preventDefault();
-  enterApp("로그인되었습니다", "email");
-});
-
-signupBtn.addEventListener("click", () => {
-  const email = el("authEmail").value;
-  const password = el("authPassword").value;
-  if (!email || !password) {
-    authError.textContent = "이메일과 비밀번호를 입력해주세요";
-    authError.classList.remove("hidden");
-    return;
-  }
-  enterApp("회원가입이 완료되었습니다", "email");
-});
-
-el("googleLoginBtn").addEventListener("click", () => {
-  enterApp("구글 계정으로 로그인되었습니다", "google");
-});
-
-function enterApp(message, method) {
-  authError.classList.add("hidden");
-  authScreen.classList.add("hidden");
-  appScreen.classList.remove("hidden");
-  state.loggedIn = true;
-  if (method) localStorage.setItem("lastLoginMethod", method);
-  showStatus(message);
-  renderAll();
-}
-
-// ===== 최근 로그인 방법 배지 표시 =====
-function showRecentLoginBadge() {
-  const method = localStorage.getItem("lastLoginMethod");
-  el("emailRecentBadge").classList.toggle("hidden", method !== "email");
-  el("googleRecentBadge").classList.toggle("hidden", method !== "google");
-}
-showRecentLoginBadge();
-
+// ===== 로그아웃 =====
 logoutBtn.addEventListener("click", () => {
-  appScreen.classList.add("hidden");
-  authScreen.classList.remove("hidden");
-  authForm.reset();
-  state.loggedIn = false;
-  showStatus("로그아웃되었습니다");
+  auth.signOut().then(() => {
+    window.location.href = "index.html";
+  });
+});
+
+// ===== 다크 모드 =====
+function applyThemeIcon() {
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  themeToggleBtn.textContent = isDark ? "☀️" : "🌙";
+}
+applyThemeIcon();
+
+themeToggleBtn.addEventListener("click", () => {
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  if (isDark) {
+    document.documentElement.removeAttribute("data-theme");
+    localStorage.setItem("theme", "light");
+  } else {
+    document.documentElement.setAttribute("data-theme", "dark");
+    localStorage.setItem("theme", "dark");
+  }
+  applyThemeIcon();
+});
+
+// ===== 일정 데이터 관리 모달 (내보내기/가져오기) =====
+dataManageBtn.addEventListener("click", () => {
+  dataModal.classList.remove("hidden");
+  requestAnimationFrame(() => dataModal.classList.add("modal-open"));
+});
+
+function closeDataModal() {
+  dataModal.classList.remove("modal-open");
+  setTimeout(() => dataModal.classList.add("hidden"), 180);
+}
+
+closeDataModalBtn.addEventListener("click", closeDataModal);
+dataModal.addEventListener("click", (e) => {
+  if (e.target === dataModal) closeDataModal();
 });
 
 // ===== 뷰 전환 (캘린더 / 리스트) =====
@@ -251,11 +298,42 @@ tabBtns.forEach((btn) => {
 });
 
 function updateViewVisibility() {
+  if (state.searchQuery.trim()) {
+    calendarView.classList.add("hidden");
+    listView.classList.remove("hidden");
+    renderList();
+    return;
+  }
   const isCalendar = state.currentView === "calendar";
   calendarView.classList.toggle("hidden", !isCalendar);
   listView.classList.toggle("hidden", isCalendar);
   if (!isCalendar) renderList();
 }
+
+// ===== 일정 검색 =====
+function getMatchingSchedules(query) {
+  const q = query.trim().toLowerCase();
+  return schedules.filter((s) => {
+    if (state.categoryFilter !== "all" && s.categoryId !== state.categoryFilter) return false;
+    const cat = getCategory(s.categoryId);
+    return s.title.toLowerCase().includes(q)
+      || (s.memo || "").toLowerCase().includes(q)
+      || cat.name.toLowerCase().includes(q);
+  });
+}
+
+searchInput.addEventListener("input", () => {
+  state.searchQuery = searchInput.value;
+  searchClearBtn.classList.toggle("hidden", !state.searchQuery.trim());
+  renderAll();
+});
+
+searchClearBtn.addEventListener("click", () => {
+  searchInput.value = "";
+  state.searchQuery = "";
+  searchClearBtn.classList.add("hidden");
+  renderAll();
+});
 
 // ===== 월 이동 =====
 prevMonthBtn.addEventListener("click", () => changeMonth(-1));
@@ -289,7 +367,9 @@ function renderCategoryFilterOptions() {
 }
 
 function getCategory(id) {
-  return categories.find((c) => c.id === id) || categories[categories.length - 1];
+  return categories.find((c) => c.id === id)
+    || categories[categories.length - 1]
+    || { id: "unknown", name: "미분류", color: "#adb5bd" }; // 카테고리가 아직 로딩되기 전 대비
 }
 
 // ===== 대한민국 공휴일 (Nager.Date API, 연도 단위로 캐싱) =====
@@ -476,6 +556,22 @@ function renderCalendar() {
       chip.addEventListener("mousemove", positionHoverPreview);
       chip.addEventListener("mouseleave", hideHoverPreview);
 
+      // 반복 없는 일정만 드래그로 날짜 이동 가능 (반복 일정은 데이터 모델상 특정 회차만 옮기는 게 불가능해서 제외)
+      if (s.repeat === "none") {
+        chip.classList.add("is-draggable");
+        chip.draggable = true;
+        chip.addEventListener("dragstart", (e) => {
+          e.stopPropagation();
+          e.dataTransfer.setData("text/plain", s.id);
+          e.dataTransfer.effectAllowed = "move";
+          chip.classList.add("dragging");
+          hideHoverPreview();
+        });
+        chip.addEventListener("dragend", () => {
+          chip.classList.remove("dragging");
+        });
+      }
+
       eventsEl.appendChild(chip);
     });
     if (dayEvents.length > 3) {
@@ -490,6 +586,21 @@ function renderCalendar() {
       state.selectedDate = dateStr;
       renderCalendar();
       showDayDetail(dateStr, dayEvents);
+    });
+
+    cell.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      cell.classList.add("drag-over");
+    });
+    cell.addEventListener("dragleave", () => {
+      cell.classList.remove("drag-over");
+    });
+    cell.addEventListener("drop", (e) => {
+      e.preventDefault();
+      cell.classList.remove("drag-over");
+      const draggedId = e.dataTransfer.getData("text/plain");
+      moveScheduleToDate(draggedId, dateStr);
     });
 
     calendarGrid.appendChild(cell);
@@ -521,17 +632,26 @@ closeDayDetailBtn.addEventListener("click", () => {
 
 // ===== 리스트 뷰 렌더링 =====
 function renderList() {
-  const year = state.currentMonth.getFullYear();
-  const month = state.currentMonth.getMonth();
-  const occByDate = getMonthOccurrences(year, month);
+  const query = state.searchQuery.trim();
+  let items;
 
-  const items = [];
-  Object.keys(occByDate).forEach((date) => {
-    occByDate[date].forEach((s) => items.push({ ...s, date }));
-  });
-  items.sort((a, b) => (a.date + (a.startTime || "")).localeCompare(b.date + (b.startTime || "")));
+  if (query) {
+    items = getMatchingSchedules(query).map((s) => ({ ...s }));
+    items.sort((a, b) => (a.date + (a.startTime || "")).localeCompare(b.date + (b.startTime || "")));
+  } else {
+    const year = state.currentMonth.getFullYear();
+    const month = state.currentMonth.getMonth();
+    const occByDate = getMonthOccurrences(year, month);
+
+    items = [];
+    Object.keys(occByDate).forEach((date) => {
+      occByDate[date].forEach((s) => items.push({ ...s, date }));
+    });
+    items.sort((a, b) => (a.date + (a.startTime || "")).localeCompare(b.date + (b.startTime || "")));
+  }
 
   scheduleList.innerHTML = "";
+  listEmptyMsg.textContent = query ? "검색 결과가 없습니다" : "이 달에 등록된 일정이 없습니다";
   listEmptyMsg.classList.toggle("hidden", items.length > 0);
 
   items.forEach((s) => scheduleList.appendChild(buildScheduleCard(s)));
@@ -550,11 +670,18 @@ function toggleOccurrenceDone(scheduleId, date) {
   const set = new Set(schedule.doneDates || []);
   const nowDone = !set.has(date);
   if (nowDone) set.add(date); else set.delete(date);
-  schedule.doneDates = [...set];
-  renderAll();
-  syncCurrentEditingSchedule();
-  updateMarkAllDoneButton();
+  updateSchedule(scheduleId, { doneDates: [...set] });
   showStatus(nowDone ? "완료로 표시했습니다" : "완료 표시를 해제했습니다");
+}
+
+// ===== 드래그 앤 드롭으로 날짜 이동 (반복 없는 일정만) =====
+function moveScheduleToDate(scheduleId, newDate) {
+  const schedule = schedules.find((s) => s.id === scheduleId);
+  if (!schedule || schedule.repeat !== "none") return;
+  if (schedule.date === newDate) return;
+  const wasDone = isOccurrenceDone(schedule, schedule.date);
+  updateSchedule(scheduleId, { date: newDate, doneDates: wasDone ? [newDate] : [] });
+  showStatus("일정을 이동했습니다");
 }
 
 // "전체 완료"의 적용 범위: 반복 종료일이 있으면 그때까지, 없으면(무한) 시작일로부터 1년치까지만 실질 적용
@@ -578,22 +705,13 @@ function toggleAllOccurrencesDone(scheduleId) {
 
   if (allDone) {
     if (!window.confirm("이 반복 일정의 완료 표시를 모두 해제하시겠습니까?")) return;
-    schedule.doneDates = [];
+    updateSchedule(scheduleId, { doneDates: [] });
     showStatus("모든 회차의 완료 표시를 해제했습니다");
   } else {
     if (!window.confirm("이 반복 일정의 모든 회차를 완료로 표시하시겠습니까?\n(반복 종료일이 없으면 1년치까지만 적용됩니다)")) return;
-    schedule.doneDates = getAllOccurrenceDates(schedule);
+    updateSchedule(scheduleId, { doneDates: getAllOccurrenceDates(schedule) });
     showStatus("모든 회차를 완료로 표시했습니다");
   }
-  renderAll();
-  syncCurrentEditingSchedule();
-  updateMarkAllDoneButton();
-}
-
-function syncCurrentEditingSchedule() {
-  if (!currentEditingSchedule) return;
-  const fresh = schedules.find((s) => s.id === currentEditingSchedule.id);
-  if (fresh) currentEditingSchedule = fresh;
 }
 
 function updateMarkAllDoneButton() {
@@ -858,7 +976,6 @@ doneInput.addEventListener("change", () => {
 markAllDoneBtn.addEventListener("click", () => {
   if (!currentEditingSchedule) return;
   toggleAllOccurrencesDone(currentEditingSchedule.id);
-  doneInput.checked = isOccurrenceDone(currentEditingSchedule, currentOccurrenceDate);
 });
 
 cancelModalBtn.addEventListener("click", () => {
@@ -1024,18 +1141,20 @@ newCategoryBtn.addEventListener("click", () => {
 });
 
 // ===== 일정 저장 =====
-scheduleForm.addEventListener("submit", (e) => {
+scheduleForm.addEventListener("submit", async (e) => {
   e.preventDefault();
 
   let categoryId = categoryInput.value;
   if (!newCategoryFields.classList.contains("hidden") && newCategoryName.value.trim()) {
-    const newCat = {
-      id: "cat_" + Date.now(),
-      name: newCategoryName.value.trim(),
-      color: newCategoryColor.value
-    };
-    categories.push(newCat);
-    categoryId = newCat.id;
+    try {
+      const newCatRef = await addCategory({
+        name: newCategoryName.value.trim(),
+        color: newCategoryColor.value
+      });
+      categoryId = newCatRef.id;
+    } catch (err) {
+      return; // addCategory 내부에서 이미 실패 메시지를 표시함
+    }
   }
   if (!categoryId) categoryId = categories[0].id; // 검색만 하고 선택하지 않은 경우 대비
 
@@ -1058,24 +1177,90 @@ scheduleForm.addEventListener("submit", (e) => {
 
   const id = scheduleIdInput.value;
   if (id) {
-    const idx = schedules.findIndex((s) => s.id === id);
-    if (idx !== -1) schedules[idx] = { ...schedules[idx], ...data };
+    updateSchedule(id, data);
   } else {
-    schedules.push({ id: "s_" + Date.now(), ...data, doneDates: doneInput.checked ? [dateInput.value] : [] });
+    addSchedule({ ...data, doneDates: doneInput.checked ? [dateInput.value] : [] });
   }
 
   closeModal();
-  renderAll();
   showStatus("일정이 저장되었습니다");
 });
 
 deleteScheduleBtn.addEventListener("click", () => {
   const id = scheduleIdInput.value;
-  schedules = schedules.filter((s) => s.id !== id);
+  deleteSchedule(id);
   closeModal();
-  renderAll();
   showStatus("일정이 삭제되었습니다");
 });
 
-// ===== 시작 (미리보기는 로그인 화면부터 시작) =====
-updateViewVisibility();
+// ===== 일정 데이터 내보내기/가져오기 (JSON) =====
+exportBtn.addEventListener("click", () => {
+  const payload = { schedules, categories, exportedAt: new Date().toISOString() };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `일정백업_${toDateStr(today)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showStatus("일정을 내보냈습니다");
+});
+
+importBtn.addEventListener("click", () => {
+  importFileInput.click();
+});
+
+importFileInput.addEventListener("change", () => {
+  const file = importFileInput.files[0];
+  importFileInput.value = ""; // 같은 파일 다시 선택해도 change가 뜨도록 초기화
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (!Array.isArray(data.schedules) || !Array.isArray(data.categories)) {
+        throw new Error("형식이 올바르지 않습니다");
+      }
+
+      // 가져온 카테고리를 기존 카테고리와 이름 기준으로 병합 (이름 같으면 재사용, 다르면 새로 추가)
+      const categoryIdMap = {};
+      for (const cat of data.categories) {
+        const existing = categories.find((c) => c.name === cat.name);
+        if (existing) {
+          categoryIdMap[cat.id] = existing.id;
+        } else {
+          const newCatRef = await addCategory({ name: cat.name, color: cat.color || "#adb5bd" });
+          categoryIdMap[cat.id] = newCatRef.id;
+        }
+      }
+
+      // 가져온 일정은 기존 일정에 추가로 병합 (addSchedule이 id를 항상 새로 발급해줌)
+      data.schedules.forEach((s) => {
+        addSchedule({
+          ...s,
+          categoryId: categoryIdMap[s.categoryId] || categories[0].id,
+          doneDates: Array.isArray(s.doneDates) ? s.doneDates : []
+        });
+      });
+
+      showStatus(`일정 ${data.schedules.length}개를 가져왔습니다`);
+    } catch (err) {
+      showStatus("파일을 가져오는 데 실패했습니다");
+    }
+  };
+  reader.readAsText(file);
+});
+
+// ===== 시작 =====
+renderAll();
+
+const pendingMessage = sessionStorage.getItem("pendingStatusMessage");
+if (pendingMessage) {
+  sessionStorage.removeItem("pendingStatusMessage");
+  showStatus(pendingMessage);
+}
+
+}
