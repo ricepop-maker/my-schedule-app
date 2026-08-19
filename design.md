@@ -24,7 +24,9 @@
 - **DB**: Firebase Firestore (무료 Spark 플랜 — 저장 1GiB, 읽기 5만/일, 쓰기 2만/일 등, 개인용 앱에 충분)
 - **인증**: 이메일/비밀번호 로그인 + 구글 로그인(팝업 방식, `signInWithPopup`) 둘 다 지원. 어느 방식으로 로그인해도 같은 Firebase 프로젝트의 Authentication에 계정으로 등록됨. 로그인 전에는 앱 사용 불가 (일정 데이터가 계정에 종속)
 - 구글 로그인을 쓰려면 Firebase 콘솔 > Authentication > Sign-in method에서 "Google" 제공업체를 추가로 활성화해야 함 (사용자가 직접 진행 — 완료함)
-- **호스팅**: 계획했던 Firebase Hosting 대신 **Vercel**로 배포함 (`https://my-schedule-app-steel.vercel.app`) → https 주소가 생기므로 [1.1](#11-안드로이드-배포-방향-2026-08-19-결정)에서 언급한 "PWA는 file://로 설치 불가" 문제도 함께 해결됨
+- **호스팅**: **Vercel**(`https://my-schedule-app-steel.vercel.app`)과 **Firebase Hosting**(`https://my-schedule-app-241d0.web.app`) 둘 다 배포함 → https 주소가 생기므로 [1.1](#11-안드로이드-배포-방향-2026-08-19-결정)에서 언급한 "PWA는 file://로 설치 불가" 문제도 함께 해결됨. Firebase Hosting 쪽은 `*.web.app`이 Firebase Auth에 기본 승인된 도메인이라 별도 "승인된 도메인" 등록 없이 구글 로그인이 바로 됨
+- Firebase CLI(`npm install -g firebase-tools`)로 배포. `firebase.json`의 `public: "."` (testapp 폴더 자체가 루트), `.firebaserc`에 프로젝트 id(`my-schedule-app-241d0`) 저장
+- **⚠️ 배포 시 `.git` 폴더 노출 사고 및 수정**: 처음 배포했을 때 `ignore` 목록의 `**/.*` 패턴이 `.git` 폴더 *내부*까지는 재귀적으로 걸러주지 못해서, `.git/config`·`.git/HEAD` 등이 실제로 공개 URL에서 200으로 접근되는 걸 배포 직후 발견함. `.git/**`와 `.firebase/**`를 `ignore`에 명시적으로 추가해서 해결 (재배포 후 404로 확인). **정적 사이트를 배포할 때는 항상 배포 URL에서 `/.git/config`가 열리는지 직접 확인하는 습관이 필요함**
 - **⚠️ 새 도메인 배포 시 필수 작업 — Firebase 승인된 도메인 추가**: Firebase Authentication은 `localhost`와 `*.firebaseapp.com`/`*.web.app`만 기본 승인해두므로, Vercel처럼 새로운 외부 도메인에 배포할 때마다 **Firebase 콘솔 > Authentication > Settings > 승인된 도메인**에 그 도메인을 직접 추가해야 구글 로그인(`signInWithPopup`)이 동작함. 안 하면 팝업이 곧바로 닫히면서 "구글 로그인 창이 닫혔습니다" 에러가 남 (실제로 한 번 겪었던 문제 — `my-schedule-app-steel.vercel.app` 추가로 해결됨). 나중에 커스텀 도메인이나 다른 배포처를 추가할 때마다 똑같이 등록해야 함
 - **오프라인 동작**: `db.enablePersistence()`로 Firestore 오프라인 캐시 활성화. 네트워크 끊겨도 마지막으로 받은 데이터는 조회 가능하고 재연결 시 자동 동기화됨
 - **SDK 로딩 방식 — 모듈(ES module) 대신 호환(compat) 버전 채택**: 처음엔 최신 모듈형 SDK(`import`)를 검토했으나, `<script type="module">`로 우리 자신의 로컬 JS 파일(`auth.js`/`app.js`)을 불러오면 Chrome이 `file://`에서 CORS 오류를 내며 막아버림 — 즉 파일을 더블클릭해서 여는 기존 방식이 완전히 깨짐. 대신 Firebase가 함께 제공하는 **호환(compat) SDK**(`firebase-app-compat.js` 등, 전역 `firebase` 객체 방식)를 일반 `<script src="...">`로 로드해서, `file://`로 바로 열어도 그대로 동작하도록 함. CDN에서 로드하므로 빌드 도구는 여전히 불필요
@@ -243,6 +245,8 @@ testapp/
 ├── app.js            # app.html 전용 로직 (Firestore 실시간 연동, 렌더링, 모달, 캘린더 등 나머지 전체)
 ├── settings.js        # settings.html 전용 로직
 ├── firebase-config.js # Firebase 프로젝트 설정값(apiKey 등) — 별도 파일로 분리해 관리
+├── firebase.json      # Firebase Hosting 배포 설정 (public: ".", .git/design.md 등 배포 제외 목록)
+├── .firebaserc        # 배포 대상 Firebase 프로젝트 id 지정
 ├── manifest.json     # PWA 설치를 위한 앱 메타데이터 (이름, 아이콘, 테마색, standalone 모드)
 ├── sw.js             # 서비스 워커 (오프라인 캐싱, PWA 설치 요건 충족용)
 └── icons/            # PWA 아이콘 (192x192, 512x512)
@@ -315,6 +319,7 @@ testapp/
 
 설계가 바뀔 때마다 날짜와 함께 기록. 최신 항목이 위로 오도록 추가.
 
+- **2026-08-19**: Firebase Hosting에도 배포 (`my-schedule-app-241d0.web.app`). Node.js + Firebase CLI를 이 PC에 새로 설치, `firebase.json`/`.firebaserc` 신설. **배포 직후 `.git` 폴더가 그대로 공개 URL에서 열리는 걸 발견** — `ignore`의 `**/.*` 패턴이 `.git` 내부까지 재귀적으로 못 걸러서였음. `.git/**`/`.firebase/**`를 명시적으로 추가해 재배포, 404로 막힌 것 확인
 - **2026-08-19**: 앱 타이틀을 "OO의 일정"(닉네임/구글이름/이메일 순)으로 개인화, 인사말 줄을 오늘 일정 개수·우선순위·시간대를 반영한 규칙 기반 문구 중 무작위 선택으로 변경(세션당 1회 선택, 실제 LLM 연동은 백엔드·과금 부담으로 보류 — [1.4](#14-타이틀인사말-개인화-방향-2026-08-19) 참고)
 - **2026-08-19**: `settings.html`/`settings.js` 신규 추가 (app.html 헤더 ⚙ 버튼, 로그아웃 버튼 왼쪽에 배치). 헤더의 다크 모드 토글을 이 페이지로 이동. 계정 정보 표시, 닉네임 설정(→ app.html 맨 위 인사말에 사용), 타임존 저장(예약 필드), 이메일 계정 비밀번호 변경(재인증 포함), 카테고리 전체 관리(색상/이름 인라인 수정 + 추가/삭제)를 추가. `users/{uid}` 프로필 문서(닉네임/타임존) 신설
 
